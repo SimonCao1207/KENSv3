@@ -1,0 +1,58 @@
+name: Test Linux Extra Environments
+
+on:
+  push:
+    branches:
+      - master
+
+env:
+  # Customize the CMake build type here (Release, Debug, RelWithDebInfo, etc.)
+  BUILD_TYPE: Release
+
+jobs:
+  tests:
+    strategy:
+      matrix:
+        config:
+          [
+            { image: "debian:stable", pm: "apt" },
+            { image: "debian:oldstable", pm: "apt" },
+            { image: "ubuntu:latest", pm: "apt" },
+            { image: "almalinux:latest", pm: "yum" },
+            { image: "rockylinux:8", pm: "yum" },
+            { image: "rockylinux:9", pm: "yum" },
+          ]
+
+    runs-on: ubuntu-20.04
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Setup Docker Container
+        run: docker run --rm -d -it --name kens-test -v ${{github.workspace}}:/test ${{ matrix.config.image }}
+
+      - name: Install g++ gcc (APT)
+        if: matrix.config.pm == 'apt'
+        run: docker exec kens-test bash -c "apt update && apt install -y cmake g++ gcc ca-certificates"
+
+      - name: Install g++ gcc (YUM)
+        if: matrix.config.pm == 'yum'
+        run: docker exec kens-test bash -c "yum -y install cmake gcc-c++ gcc ca-certificates"
+
+      - name: Create Build Environment
+        # Some projects don't allow in-source building, so create a separate build directory
+        # We'll use this as our working directory for all subsequent commands
+        run: docker exec kens-test bash -c "cmake -E make_directory /test/build"
+
+      - name: Configure CMake
+
+        run: docker exec kens-test bash -c "cd /test/build && cmake /test -DCMAKE_BUILD_TYPE=$BUILD_TYPE"
+
+      - name: Build
+        run: docker exec kens-test bash -c "cd /test/build && cmake --build . --config $BUILD_TYPE"
+
+      - name: Test
+        run: docker exec kens-test bash -c "/test/build/app/kens/test-kens-all-run-solution"
+
+      - name: Test (Unreliable)
+        run: docker exec kens-test bash -c "/test/build/app/kens/test-kens-all-unreliable-run-solution"
