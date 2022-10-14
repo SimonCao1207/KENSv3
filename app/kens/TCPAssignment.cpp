@@ -30,7 +30,9 @@ void TCPAssignment::finalize() {}
 int TCPAssignment:: _syscall_socket(int pid) {
   int fd = this->createFileDescriptor(pid);
   if (fd != -1){
-    pairKeySet.insert({fd, pid});
+    std::pair<int, int> pairKey {fd, pid};
+    pairKeySet.insert(pairKey);
+    pairKeyToSucket[pairKey] = Sucket(pairKey, TCP_CLOSED); 
   }
   return fd;
 }
@@ -39,28 +41,32 @@ void TCPAssignment:: syscall_socket(UUID syscallUUID, int pid, int type, int pro
   this->returnSystemCall(syscallUUID, _syscall_socket(pid));
 }
 
-int TCPAssignment:: _syscall_bind(int sockfd, int pid, struct sockaddr *addr, socklen_t addrlen){
-
-  std::pair<sockaddr, socklen_t> addrInfo = {*addr, addrlen};
+std::pair<uint32_t, uint16_t> fromAddrInfoToAddr (std::pair<sockaddr, socklen_t> addrInfo) {  
   sockaddr_in address = *((sockaddr_in *) &addrInfo.first);
   uint32_t ip = ntohl(address.sin_addr.s_addr);
   uint16_t port = ntohs(address.sin_port);
+  return {ip, port};
+}
 
-  std::pair<uint32_t, uint16_t> currAddress = {ip, port};
-  std::pair<uint32_t, uint16_t> addressZero = {0U, port};
+int TCPAssignment:: _syscall_bind(int sockfd, int pid, struct sockaddr *addr, socklen_t addrlen){
+
+  std::pair<sockaddr, socklen_t> addrInfo = {*addr, addrlen};
+
+  std::pair<uint32_t, uint16_t> currAddress = fromAddrInfoToAddr(addrInfo);
+  std::pair<uint32_t, uint16_t> addressZero = {0U, currAddress.second};
 
   if (bindedAddress.count(currAddress) || bindedAddress.count(addressZero)) {
     return -1;
   }  
   std::pair<int, int> pairKey = {sockfd, pid};
-  processToAddrInfo[pairKey] = addrInfo;
+  pairKeyToAddrInfo[pairKey] = addrInfo;
   bindedAddress.insert(currAddress);
   return 0;
 }
 
 void TCPAssignment:: syscall_bind( UUID syscallUUID, int pid, int sockfd, struct sockaddr *addr, socklen_t addrlen){
   std::pair<int, int> pairKey = {sockfd, pid};
-  if (!pairKeySet.count(pairKey) || processToAddrInfo.count(pairKey)){
+  if (!pairKeySet.count(pairKey) || pairKeyToAddrInfo.count(pairKey)){
     this->returnSystemCall(syscallUUID, -1);
     return;
   }
@@ -68,15 +74,57 @@ void TCPAssignment:: syscall_bind( UUID syscallUUID, int pid, int sockfd, struct
 }
 
 void TCPAssignment:: syscall_getsockname( UUID syscallUUID, int pid, int sockfd, struct sockaddr *addr, socklen_t* addrlen) {
-  PairKey pairKey {sockfd, pid};
-  if (!pairKeySet.count(pairKey) || !processToAddrInfo.count(pairKey)){
+PairKey pairKey {sockfd, pid};
+if (pairKeySet.find(pairKey) == pairKeySet.end() || pairKeyToAddrInfo.find(pairKey) == pairKeyToAddrInfo.end()){
+  this->returnSystemCall(syscallUUID, -1);
+  return;
+}
+
+  *addr = pairKeyToAddrInfo[pairKey].first;
+  *addrlen = pairKeyToAddrInfo[pairKey].second;
+
+  this->returnSystemCall(syscallUUID, 0);
+}
+
+void TCPAssignment:: _sendPacket(Sucket sucket, uint8_t flag){
+  // TODO: Create a packet and send to IP layer
+  return;
+}
+
+void TCPAssignment:: syscall_close(UUID syscallUUID, int pid, int sockfd){
+  std::pair<int, int> pairKey {sockfd, pid}; 
+  if (pairKeySet.find(pairKey) == pairKeySet.end()){
     this->returnSystemCall(syscallUUID, -1);
-    return;
+    return; 
   }
 
-  *addr = processToAddrInfo[pairKey].first;
-  *addrlen = processToAddrInfo[pairKey].second;
+  Sucket sucket = pairKeyToSucket[pairKey];
+  TCP_STATE state = sucket.state;
+  switch (state)
+  {
+    case TCP_ESTABLISHED:
+      _sendPacket(sucket, TH_FIN | TH_ACK);
+      sucket.state = TCP_FIN_WAIT_1;
+      break;
 
+    case TCP_CLOSE_WAIT:
+      _sendPacket(sucket, TH_FIN | TH_ACK);
+      sucket.state = TCP_LAST_ACK;
+      break;
+    
+    default:
+      if (pairKeyToAddrInfo.find(pairKey) != pairKeyToAddrInfo.end()){
+        std::pair<sockaddr, socklen_t> addrInfo = pairKeyToAddrInfo[pairKey];
+        std::pair<uint32_t, uint16_t> addr = fromAddrInfoToAddr(addrInfo);
+        bindedAddress.erase(addr);
+        pairKeyToAddrInfo.erase(pairKey);
+      }
+      pairKeySet.erase(pairKey);
+      pairKeyToSucket.erase(pairKey);
+      break;
+  }
+
+  this->removeFileDescriptor(pid, sockfd);
   this->returnSystemCall(syscallUUID, 0);
 }
 
@@ -162,7 +210,7 @@ void TCPAssignment::systemCallback(UUID syscallUUID, int pid,
                          std::get<int>(param.params[1]));
     break;
   case CLOSE:
-    // this->syscall_close(syscallUUID, pid, std::get<int>(param.params[0]));
+    this->syscall_close(syscallUUID, pid, std::get<int>(param.params[0]));
     break;
   case READ:
     // this->syscall_read(syscallUUID, pid, std::get<int>(param.params[0]),

@@ -79,6 +79,20 @@ protected:
   // typedef
   typedef std::pair<int, int> PairKey; // (sockfd, id)
 
+  enum TCP_STATE {
+    TCP_CLOSED,
+    TCP_LISTEN,
+    TPC_SYN_RCVD,
+    TCP_ESTABLISHED,
+    TCP_CLOSE_WAIT,
+    TCP_LAST_ACK,
+    //----------//
+    TCP_SYN_SENT,
+    TCP_FIN_WAIT_1,
+    TCP_FIN_WAIT_2,
+    TCP_TIME_WAIT,
+  }; 
+
   // structs
   struct Address {
     uint16_t port;
@@ -90,7 +104,7 @@ protected:
     int bytesRcvd;
     int bytesAck;
     std::queue<uint8_t> bufferData;
-    BufferRcv() : bytesRcvd(0), bytesAck(0), bufferData(std::queue<uint8_t>()) {}
+    BufferRcv() : bytesRcvd(0), bufferData(std::queue<uint8_t>()) {}
   };
 
   struct BufferSnd {
@@ -107,11 +121,10 @@ protected:
     PairKey pairKey;
     BufferRcv bufferRcv;
     BufferSnd bufferSnd;
-    uint8_t state;
+    TCP_STATE state;
     UUID syscall_id;
     uint32_t seqNum;
     uint32_t ackNum;
-
     Sucket(PairKey pairKey, Address localAddr, uint8_t state): pairKey(pairKey), localAddr(localAddr), remoteAddr(localAddr), state(state) {}
   };
 
@@ -126,7 +139,6 @@ protected:
   virtual void systemCallback(UUID syscallUUID, int pid,
                               const SystemCallParameter &param) final;
   virtual void packetArrived(std::string fromModule, Packet &&packet) final;
-
   virtual int _syscall_socket(int pid) final;
 	virtual void syscall_socket(UUID syscallUUID, int pid, int type, int protocol) final;
   virtual int _syscall_bind( int sockfd, int pid, struct sockaddr *addr, socklen_t addrlen) final;
@@ -134,6 +146,8 @@ protected:
   virtual void syscall_getsockname(UUID syscallUUID, int pid, int sockfd, struct sockaddr *addr, socklen_t* addrlen) final;
   virtual void syscall_connect(UUID syscallUUID, int pid, int sockfd, const struct sockaddr *addr, socklen_t addrlen) final;
   virtual Packet* create_packet(struct Sucket&, uint8_t) final;
+  virtual void syscall_close(UUID syscallUUID, int pid, int sockfd) final;
+  virtual void _sendPacket(Sucket sucket, uint8_t type) final;
 }; 
 
 class TCPAssignmentProvider {
