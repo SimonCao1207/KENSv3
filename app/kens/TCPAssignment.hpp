@@ -33,21 +33,43 @@ public:
 
 protected:
 
-  // struct myHash {
-	// size_t operator()(const std::pair<int, int> &x) const {
-	// 	return x.first ^ x.second;
-	// }
-  // };
+  // structs
+  struct Address {
+    int port;
+    int ip;
+    
+    Address(int port, int ip): port(port), ip(ip) {}
+  };
 
-  // struct myAddrHash {
-	// size_t operator()(const std::pair<uint32_t, uint16_t> &addr) const{
-	// 	return addr.first ^ addr.second;
-	// }
-  // };
+  struct BufferRcv {
+    int bytesRcvd;
+    std::queue<uint8_t> bufferData;
+    BufferRcv() : bytesRcvd(0), bytesAck(0), bufferData(std::queue<uint8_t>()) {}
+  };
 
-  // std::unordered_map<std::pair<int, int>, std::pair<sockaddr, socklen_t>, myHash> processToAddrInfo; 
-  // std::unordered_set<std::pair<int, int>, myHash> pairKeySet;
+  struct BufferSnd {
+    int bytesSnd;
+    int bytesAck;
+    int cwnd;
+    std::queue<uint8_t> bufferData;
+    BufferSnd(): bytesSnd(0), bytesAck(0), bufferData(std::queue<uint8_t>()) {}
+  };
 
+  struct Sucket {
+    Address localAddr;
+    Address remoteAddr;
+    std::pair<int, int> pairKey;
+    BufferRcv bufferRcv;
+    BufferSnd bufferSnd;
+    uint8_t state;
+    UUID syscall_id;
+    uint32_t seqNum;
+    uint32_t ackNum;
+
+    Sucket(std::pair<int, int> pairKey, uint8_t state): pairKey(pairKey), state(state) {}
+  };
+
+  // maps & set
   std::unordered_map<std::pair<int, int>, std::pair<sockaddr, socklen_t>> processToAddrInfo; 
   std::unordered_set<std::pair<int, int>> pairKeySet;
   
