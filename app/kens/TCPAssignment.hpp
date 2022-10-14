@@ -32,10 +32,35 @@ public:
   virtual ~TCPAssignment();
 
 protected:
+
+  struct myHash {
+	size_t operator()(const std::pair<int, int> &x) const {
+		return x.first ^ x.second;
+	}
+  };
+
+  struct myAddrHash {
+	size_t operator()(const std::pair<uint32_t, uint16_t> &addr) const{
+		return addr.first ^ addr.second;
+	}
+  };
+
+  std::unordered_map<std::pair<int, int>, std::pair<sockaddr, socklen_t>, myHash> processToAddrInfo; 
+  std::unordered_set<std::pair<int, int>, myHash> pairKeySet;
+  std::unordered_set<std::pair<uint32_t, uint16_t>, myAddrHash> bindedAddress; 
+
+
+
   virtual void systemCallback(UUID syscallUUID, int pid,
                               const SystemCallParameter &param) final;
   virtual void packetArrived(std::string fromModule, Packet &&packet) final;
-};
+
+  virtual int _syscall_socket(int pid) final;
+	virtual void syscall_socket(UUID syscallUUID, int pid, int type, int protocol) final;
+  virtual int _syscall_bind( int sockfd, int pid, struct sockaddr *addr, socklen_t addrlen) final;
+  virtual void syscall_bind(UUID syscallUUID, int pid, int sockfd, struct sockaddr *addr, socklen_t addrlen) final;
+  virtual void syscall_getsockname(UUID syscallUUID, int pid, int sockfd, struct sockaddr *addr, socklen_t* addrlen) final;
+}; 
 
 class TCPAssignmentProvider {
 private:
