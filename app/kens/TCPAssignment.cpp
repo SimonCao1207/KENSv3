@@ -12,6 +12,7 @@
 #include <E/Networking/E_Networking.hpp>
 #include <E/Networking/E_Packet.hpp>
 #include <cerrno>
+#include <random>
 
 namespace E {
 
@@ -67,7 +68,7 @@ void TCPAssignment:: syscall_bind( UUID syscallUUID, int pid, int sockfd, struct
 }
 
 void TCPAssignment:: syscall_getsockname( UUID syscallUUID, int pid, int sockfd, struct sockaddr *addr, socklen_t* addrlen) {
-  std::pair<int, int> pairKey {sockfd, pid};
+  PairKey pairKey {sockfd, pid};
   if (!pairKeySet.count(pairKey) || !processToAddrInfo.count(pairKey)){
     this->returnSystemCall(syscallUUID, -1);
     return;
@@ -77,6 +78,75 @@ void TCPAssignment:: syscall_getsockname( UUID syscallUUID, int pid, int sockfd,
   *addrlen = processToAddrInfo[pairKey].second;
 
   this->returnSystemCall(syscallUUID, 0);
+}
+
+void TCPAssignment::syscall_connect(UUID syscallUUID, int pid, int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
+  
+  // DEBUG
+  std::cerr << "Connecting pid=" << pid << ", sockfd=" << sockfd << '\n';
+  
+  PairKey pairKey {sockfd, pid};
+  
+  if(pairKeyToSucket.find(pairKey) == pairKeyToSucket.end()) {
+    this->returnSystemCall(syscallUUID, -1);
+    return;
+  }
+
+  Sucket &sucket = pairKeyToSucket[pairKey];
+
+  sockaddr_in addr_in = * ((sockaddr_in*) addr);
+  uint32_t dest_ip = ntohl(addr_in.sin_addr.s_addr);
+  uint16_t dest_port = ntohs(addr_in.sin_port);
+  sucket.remoteAddr = Address(dest_ip, dest_port);
+  
+  uint8_t flags = SYN_FLAG;
+  
+  Packet* packet = create_packet(sucket, flags);
+
+  // bool timeout = false;
+  // TCPAssignment::addTimer(&timeout, 1000000000);
+}
+
+Packet* TCPAssignment::create_packet(struct Sucket& sucket, uint8_t flags) {
+  // packet data section = 0, currently not support data
+  // DEBUG
+  std::cerr << "Creating packet from ip=" << sucket.localAddr.ip << ",port=" << sucket.localAddr.port << " to ip=" << sucket.remoteAddr.ip << ",port=" << sucket.remoteAddr.port << " with flags=" << flags << '\n';
+
+  Packet packet = Packet(100);
+
+  uint8_t version_header_length = (4 << 4) + 20;
+  packet.writeData(VERSION_HEADER_LENGTH_OFFSET, &version_header_length, VERSION_HEADER_LENGTH);
+
+  uint16_t datagram_length = htons(40);
+  packet.writeData(DATAGRAM_LENGTH_OFFSET, &datagram_length, DATAGRAM_LENGTH);
+
+  uint32_t source_ip = htonl(sucket.localAddr.ip);
+  uint16_t source_port = htons(sucket.localAddr.port);
+  uint32_t dest_ip = htonl(sucket.remoteAddr.ip);
+  uint16_t dest_port = htons(sucket.remoteAddr.port);
+
+  packet.writeData(SOURCE_IP_OFFSET, &source_ip, SOURCE_IP_LENGTH);
+  packet.writeData(DEST_IP_OFFSET, &dest_ip, DEST_IP_LENGTH);
+  packet.writeData(SOURCE_PORT_OFFSET, &source_port, SOURCE_PORT_LENGTH);
+  packet.writeData(DEST_PORT_OFFSET, &dest_port, DEST_PORT_LENGTH);
+
+  uint32_t seq_num = htonl(uint32_t(rand()) * uint32_t(rand()) * uint32_t(rand()));
+  packet.writeData(SEQ_NUM_OFFSET, &seq_num, SEQ_NUM_LENGTH);
+
+  // skip ack_num
+  packet.writeData(FLAGS_OFFSET, &flags, FLAGS_LENGTH);
+  // skip rwnd
+
+  uint16_t zero_checksum = htons(0);
+  packet.writeData(CHECKSUM_OFFSET, &zero_checksum, CHECKSUM_LENGTH);
+  size_t length = 20;
+  uint8_t* tcp_seg = (uint8_t*)malloc(length);
+  packet.readData(SOURCE_PORT_OFFSET, tcp_seg, length); // tcp_seg = start index tcp_seg in mem
+  uint16_t checksum = htons(~NetworkUtil::tcp_sum(source_ip, dest_ip, tcp_seg, length));
+
+  packet.writeData(CHECKSUM_OFFSET, &checksum, CHECKSUM_LENGTH);
+
+  return &packet;
 }
 
 void TCPAssignment::systemCallback(UUID syscallUUID, int pid,
@@ -105,10 +175,10 @@ void TCPAssignment::systemCallback(UUID syscallUUID, int pid,
     //                     std::get<int>(param.params[2]));
     break;
   case CONNECT:
-    // this->syscall_connect(
-    //     syscallUUID, pid, std::get<int>(param.params[0]),
-    //     static_cast<struct sockaddr *>(std::get<void *>(param.params[1])),
-    //     (socklen_t)std::get<int>(param.params[2]));
+    this->syscall_connect(
+        syscallUUID, pid, std::get<int>(param.params[0]),
+        static_cast<struct sockaddr *>(std::get<void *>(param.params[1])),
+        (socklen_t)std::get<int>(param.params[2]));
     break;
   case LISTEN:
     // this->syscall_listen(syscallUUID, pid, std::get<int>(param.params[0]),
@@ -151,7 +221,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
 
 void TCPAssignment::timerCallback(std::any payload) {
   // Remove below
-  (void)payload;
+  *payload = true;
 }
 
 } // namespace E
