@@ -33,21 +33,25 @@ public:
 
 protected:
 
-  struct myHash {
-	size_t operator()(const std::pair<int, int> &x) const {
-		return x.first ^ x.second;
-	}
-  };
+  // struct myHash {
+	// size_t operator()(const std::pair<int, int> &x) const {
+	// 	return x.first ^ x.second;
+	// }
+  // };
 
-  struct myAddrHash {
-	size_t operator()(const std::pair<uint32_t, uint16_t> &addr) const{
-		return addr.first ^ addr.second;
-	}
-  };
+  // struct myAddrHash {
+	// size_t operator()(const std::pair<uint32_t, uint16_t> &addr) const{
+	// 	return addr.first ^ addr.second;
+	// }
+  // };
 
-  std::unordered_map<std::pair<int, int>, std::pair<sockaddr, socklen_t>, myHash> processToAddrInfo; 
-  std::unordered_set<std::pair<int, int>, myHash> pairKeySet;
-  std::unordered_set<std::pair<uint32_t, uint16_t>, myAddrHash> bindedAddress; 
+  // std::unordered_map<std::pair<int, int>, std::pair<sockaddr, socklen_t>, myHash> processToAddrInfo; 
+  // std::unordered_set<std::pair<int, int>, myHash> pairKeySet;
+
+  std::unordered_map<std::pair<int, int>, std::pair<sockaddr, socklen_t>> processToAddrInfo; 
+  std::unordered_set<std::pair<int, int>> pairKeySet;
+  
+  std::unordered_set<std::pair<uint32_t, uint16_t>> bindedAddress; 
 
 
 
