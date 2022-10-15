@@ -30,7 +30,8 @@ void TCPAssignment::finalize() {}
 int TCPAssignment:: _syscall_socket(int pid) {
   int fd = this->createFileDescriptor(pid);
   if (fd != -1){
-    std::pair<int, int> pairKey {fd, pid};
+
+    PairKey pairKey {fd, pid};
     pairKeySet.insert(pairKey);
     pairKeyToSucket[pairKey] = Sucket(pairKey, TCP_CLOSED); 
   }
@@ -271,6 +272,31 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
   // Remove below
   (void)fromModule;
   (void)packet;
+
+  uint8_t flags;
+  Packet packetClone = packet.clone();
+
+  // TODO read packet
+
+  switch (flags)
+  {
+    case (FIN_FLAG): 
+      break;
+
+    case (FIN_FLAG | ACK_FLAG):
+      break;
+    
+    case (SYN_FLAG | ACK_FLAG):
+      break;
+
+    case (ACK_FLAG):
+     break;
+
+    default:
+      break;
+  }
+
+
 }
 
 void TCPAssignment::timerCallback(std::any payload) {

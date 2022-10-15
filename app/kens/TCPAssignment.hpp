@@ -66,15 +66,18 @@ protected:
   #define DATA_LENGTH 4
 
   // constants
-  const uint8_t CWR_FLAG = (1 << 7);
-  const uint8_t ECE_FLAG = (1 << 6);
-  const uint8_t URG_FLAG = (1 << 5);
-  const uint8_t ACK_FLAG = (1 << 4);
-  const uint8_t PSH_FLAG = (1 << 3);
-  const uint8_t RST_FLAG = (1 << 2);
-  const uint8_t SYN_FLAG = (1 << 1);
-  const uint8_t FIN_FLAG = (1 << 0);
-
+  
+  enum FLAG {
+    CWR_FLAG = (1 << 7),
+    ECE_FLAG = (1 << 6),
+    URG_FLAG = (1 << 5),
+    ACK_FLAG = (1 << 4),
+    PSH_FLAG = (1 << 3),
+    RST_FLAG = (1 << 2),
+    SYN_FLAG = (1 << 1),
+    FIN_FLAG = (1 << 0),
+  };
+  
 
   // typedef
   typedef std::pair<int, int> PairKey; // (sockfd, id)
