@@ -104,12 +104,6 @@ protected:
     Address() : port(0), ip(0){};
     Address(uint32_t ip, uint16_t port): port(port), ip(ip) {}
   };
-
-  struct  AddressKey{
-    Address localAddress;
-    Address remoteAddress;
-    AddressKey(const Address &localAddress, const Address &remoteAddress): localAddress(localAddress), remoteAddress(remoteAddress){}
-  };
   
   struct BufferRcv {
     int bytesRcvd;
