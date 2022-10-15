@@ -148,12 +148,25 @@ void TCPAssignment::syscall_connect(UUID syscallUUID, int pid, int sockfd, const
   uint32_t dest_ip = ntohl(addr_in.sin_addr.s_addr);
   uint16_t dest_port = ntohs(addr_in.sin_port);
   sucket.remoteAddr = Address(dest_ip, dest_port);
-  
-  Packet packet = create_packet(sucket, SYN_FLAG);
 
   pairAddressToSucket[{{sucket.localAddr.ip, sucket.remoteAddr.port}, {sucket.remoteAddr.ip, sucket.remoteAddr.port}}] = sucket;
-  // bool timeout = false;
-  // TCPAssignment::addTimer(&timeout, 1000000000);
+
+  _send_packet(sucket, SYN_FLAG);
+  sucket.state = TCP_SYN_SENT;
+
+  bool timeout = false;
+  UUID timerId = TCPAssignment::addTimer(&timeout, 1000000000);
+  while(sucket.state == TCP_SYN_SENT) {
+    if(timeout) { // timeout => failed to connect
+      sucket.state = TCP_CLOSED;
+      this->returnSystemCall(syscallUUID, -1);
+      return;
+    }
+  }
+
+  TCPAssignment::cancelTimer(timerId);
+  this->returnSystemCall(syscallUUID, 0);
+  return;
 }
 
 Packet TCPAssignment::create_packet(struct Sucket& sucket, uint8_t flags) {
@@ -341,7 +354,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
 
 void TCPAssignment::timerCallback(std::any payload) {
   // Remove below
-  // *payload = true;
+  *payload = true;
 }
 
 } // namespace E
