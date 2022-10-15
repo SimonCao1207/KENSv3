@@ -80,17 +80,19 @@ protected:
   
   // typedef
   typedef std::pair<int, int> PairKey; // (sockfd, id)
+  typedef std::pair<std::pair<uint32_t, uint16_t>, std::pair<uint32_t, uint16_t>> PairAddress; // <ip, port>, <ip,port> 
 
   enum TCP_STATE {
     TCP_CLOSED,
     TCP_LISTEN,
+    TCP_SYN_SENT,
     TPC_SYN_RCVD,
     TCP_ESTABLISHED,
     TCP_CLOSE_WAIT,
     TCP_LAST_ACK,
     //----------//
-    TCP_SYN_SENT,
     TCP_FIN_WAIT_1,
+    TCP_CLOSING,
     TCP_FIN_WAIT_2,
     TCP_TIME_WAIT,
   }; 
@@ -103,6 +105,12 @@ protected:
     Address(uint32_t ip, uint16_t port): port(port), ip(ip) {}
   };
 
+  struct  AddressKey{
+    Address localAddress;
+    Address remoteAddress;
+    AddressKey(const Address &localAddress, const Address &remoteAddress): localAddress(localAddress), remoteAddress(remoteAddress){}
+  };
+  
   struct BufferRcv {
     int bytesRcvd;
     int bytesAck;
@@ -141,6 +149,7 @@ protected:
   std::unordered_set<PairKey> pairKeySet;
   std::unordered_set<std::pair<uint32_t, uint16_t>> bindedAddress;
   std::unordered_map<PairKey, Sucket> pairKeyToSucket;  
+  std::unordered_map<PairAddress, Sucket> pairAddressToSucket;
 
 
 

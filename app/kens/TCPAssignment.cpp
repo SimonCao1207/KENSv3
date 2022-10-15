@@ -105,12 +105,12 @@ void TCPAssignment:: syscall_close(UUID syscallUUID, int pid, int sockfd){
   switch (state)
   {
     case TCP_ESTABLISHED:
-      _send_packet(sucket, TH_FIN | TH_ACK);
+      _send_packet(sucket, FIN_FLAG | ACK_FLAG);
       sucket.state = TCP_FIN_WAIT_1;
       break;
 
     case TCP_CLOSE_WAIT:
-      _send_packet(sucket, TH_FIN | TH_ACK);
+      _send_packet(sucket, FIN_FLAG | ACK_FLAG);
       sucket.state = TCP_LAST_ACK;
       break;
     
@@ -149,10 +149,9 @@ void TCPAssignment::syscall_connect(UUID syscallUUID, int pid, int sockfd, const
   uint16_t dest_port = ntohs(addr_in.sin_port);
   sucket.remoteAddr = Address(dest_ip, dest_port);
   
-  uint8_t flags = SYN_FLAG;
-  
-  Packet packet = create_packet(sucket, flags);
+  Packet packet = create_packet(sucket, SYN_FLAG);
 
+  pairAddressToSucket[{{sucket.localAddr.ip, sucket.remoteAddr.port}, {sucket.remoteAddr.ip, sucket.remoteAddr.port}}] = sucket;
   // bool timeout = false;
   // TCPAssignment::addTimer(&timeout, 1000000000);
 }
@@ -194,7 +193,7 @@ Packet TCPAssignment::create_packet(struct Sucket& sucket, uint8_t flags) {
   packet.writeData(CHECKSUM_OFFSET, &zero_checksum, CHECKSUM_LENGTH);
   size_t length = 20;
   uint8_t* tcp_seg = (uint8_t*)malloc(length);
-  packet.readData(SOURCE_PORT_OFFSET, tcp_seg, length); // tcp_seg = start index tcp_seg in mem
+  packet.writeData(SOURCE_PORT_OFFSET, tcp_seg, length); // tcp_seg = start index tcp_seg in mem
   uint16_t checksum = htons(~NetworkUtil::tcp_sum(source_ip, dest_ip, tcp_seg, length));
 
   packet.writeData(CHECKSUM_OFFSET, &checksum, CHECKSUM_LENGTH);
@@ -275,8 +274,8 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
 
   uint8_t flags;
   uint8_t seqNum;
-  uint32_t source_ip;
-  uint16_t source_port;
+  uint32_t source_ip, dest_ip;
+  uint16_t source_port, dest_port;
 
   Packet packetClone = packet.clone(); 
   
@@ -284,8 +283,14 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
   packet.readData(SEQ_NUM_OFFSET, &seqNum, SEQ_NUM_LENGTH);
   packet.readData(SOURCE_IP_OFFSET, &source_ip, SOURCE_IP_LENGTH);
   packet.readData(SOURCE_PORT_OFFSET, &source_port, SOURCE_PORT_LENGTH);
+  packet.writeData(DEST_IP_OFFSET, &dest_ip, DEST_IP_LENGTH);
+  packet.writeData(DEST_PORT_OFFSET, &dest_port, DEST_PORT_LENGTH);
+  
+  PairAddress pairAddress {{source_ip, source_port} , {dest_ip,dest_port}};
+  
+  Sucket &sucket = pairAddressToSucket[pairAddress];
 
-  // TODO handle flag in for each case
+  // TODO: handle ackNum and seqNum in each flag
 
   switch (flags)
   {
@@ -294,12 +299,27 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
       break;
 
     case (FIN_FLAG | ACK_FLAG):
-      std::cout << "This is FIN_ACK FLAG \n"; 
+      std::cout << "This is FIN_ACK FLAG \n";
+      if (sucket.state == TCP_FIN_WAIT_1){
+       
+        sucket.state = TCP_CLOSING;
+        _send_packet(sucket, ACK_FLAG);        
+      }
+      else if (sucket.state == TCP_FIN_WAIT_2){
+        _send_packet(sucket, ACK_FLAG);
+        sucket.state = TCP_TIME_WAIT;
+        // TODO: Add a timer here
+      }
+      else if (sucket.state == TCP_ESTABLISHED){
+        _send_packet(sucket, ACK_FLAG);
+        sucket.state = TCP_CLOSE_WAIT;
+      }
       break;
     
     case (SYN_FLAG):
       std::cout << "This is SYN FLAG \n";
       std::cout << "Receiving packet from ip=" << source_ip << ",port=" << source_port << '\n';
+      
       
       break; 
 
