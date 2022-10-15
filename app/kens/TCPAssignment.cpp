@@ -30,7 +30,8 @@ void TCPAssignment::finalize() {}
 int TCPAssignment:: _syscall_socket(int pid) {
   int fd = this->createFileDescriptor(pid);
   if (fd != -1){
-    std::pair<int, int> pairKey {fd, pid};
+
+    PairKey pairKey {fd, pid};
     pairKeySet.insert(pairKey);
     pairKeyToSucket[pairKey] = Sucket(pairKey, TCP_CLOSED); 
   }
@@ -88,7 +89,8 @@ if (pairKeySet.find(pairKey) == pairKeySet.end() || pairKeyToAddrInfo.find(pairK
 
 void TCPAssignment:: _sendPacket(Sucket sucket, uint8_t flag){
   // TODO: Create a packet and send to IP layer
-  return;
+  Packet* packet = create_packet(sucket, flag);
+  // this->sendPacket("IPv4", packet);
 }
 
 void TCPAssignment:: syscall_close(UUID syscallUUID, int pid, int sockfd){
@@ -103,12 +105,14 @@ void TCPAssignment:: syscall_close(UUID syscallUUID, int pid, int sockfd){
   switch (state)
   {
     case TCP_ESTABLISHED:
-      _sendPacket(sucket, TH_FIN | TH_ACK);
+      
+      _sendPacket(sucket, SYN_FLAG | ACK_FLAG);
       sucket.state = TCP_FIN_WAIT_1;
       break;
 
     case TCP_CLOSE_WAIT:
-      _sendPacket(sucket, TH_FIN | TH_ACK);
+      
+      _sendPacket(sucket, FIN_FLAG | ACK_FLAG);
       sucket.state = TCP_LAST_ACK;
       break;
     
@@ -266,6 +270,31 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
   // Remove below
   (void)fromModule;
   (void)packet;
+
+  uint8_t flags;
+  Packet packetClone = packet.clone();
+
+  // TODO read packet
+
+  switch (flags)
+  {
+    case (FIN_FLAG): 
+      break;
+
+    case (FIN_FLAG | ACK_FLAG):
+      break;
+    
+    case (SYN_FLAG | ACK_FLAG):
+      break;
+
+    case (ACK_FLAG):
+     break;
+
+    default:
+      break;
+  }
+
+
 }
 
 void TCPAssignment::timerCallback(std::any payload) {
