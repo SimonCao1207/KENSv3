@@ -78,7 +78,6 @@ protected:
     FIN_FLAG = (1 << 0),
   };
   
-
   // typedef
   typedef std::pair<int, int> PairKey; // (sockfd, id)
 
@@ -131,7 +130,10 @@ protected:
     uint32_t ackNum;
     Sucket() : state(TCP_CLOSED){}
     Sucket(PairKey pairKey, TCP_STATE state) : pairKey(pairKey), state(state) {}
-    Sucket(PairKey pairKey, Address localAddr, TCP_STATE state): pairKey(pairKey), localAddr(localAddr), remoteAddr(localAddr), state(state) {}
+    Sucket(PairKey pairKey, Address localAddr, TCP_STATE state): pairKey(pairKey), localAddr(localAddr), remoteAddr(localAddr), state(state) {
+      // Initialize random seq_num here
+      seqNum = uint32_t(rand()) * uint32_t(rand()) * uint32_t(rand());
+    }
   };
 
   // maps & set

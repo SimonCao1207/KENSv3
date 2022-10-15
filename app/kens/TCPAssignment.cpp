@@ -181,7 +181,7 @@ Packet TCPAssignment::create_packet(struct Sucket& sucket, uint8_t flags) {
   packet.writeData(SOURCE_PORT_OFFSET, &source_port, SOURCE_PORT_LENGTH);
   packet.writeData(DEST_PORT_OFFSET, &dest_port, DEST_PORT_LENGTH);
 
-  uint32_t seq_num = htonl(uint32_t(rand()) * uint32_t(rand()) * uint32_t(rand()));
+  uint32_t seq_num = htonl(sucket.seqNum);
   packet.writeData(SEQ_NUM_OFFSET, &seq_num, SEQ_NUM_LENGTH);
 
   // skip ack_num
@@ -274,25 +274,45 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
   (void)packet;
 
   uint8_t flags;
-  Packet packetClone = packet.clone();
+  uint8_t seqNum;
+  uint32_t source_ip;
+  uint16_t source_port;
 
-  // TODO read packet
+  Packet packetClone = packet.clone(); 
+  
+  packet.readData(FLAGS_OFFSET, &flags, FLAGS_LENGTH);
+  packet.readData(SEQ_NUM_OFFSET, &seqNum, SEQ_NUM_LENGTH);
+  packet.readData(SOURCE_IP_OFFSET, &source_ip, SOURCE_IP_LENGTH);
+  packet.readData(SOURCE_PORT_OFFSET, &source_port, SOURCE_PORT_LENGTH);
+
+  // TODO handle flag in for each case
 
   switch (flags)
   {
-    case (FIN_FLAG): 
+    case (FIN_FLAG):
+      std::cout << "This is FIN_ FLAG \n"; 
       break;
 
     case (FIN_FLAG | ACK_FLAG):
+      std::cout << "This is FIN_ACK FLAG \n"; 
       break;
     
+    case (SYN_FLAG):
+      std::cout << "This is SYN FLAG \n";
+      std::cout << "Receiving packet from ip=" << source_ip << ",port=" << source_port << '\n';
+      
+      break; 
+
     case (SYN_FLAG | ACK_FLAG):
+      std::cout << "This is SYN_ACK FLAG \n"; 
       break;
 
     case (ACK_FLAG):
+      std::cout << "This is ACK_ FLAG \n"; 
      break;
 
     default:
+      std::cout << "No FLAG seen: " << unsigned(flags); 
       break;
   }
 
