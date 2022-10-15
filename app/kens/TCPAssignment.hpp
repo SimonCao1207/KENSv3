@@ -97,6 +97,7 @@ protected:
   struct Address {
     uint16_t port;
     uint32_t ip;
+    Address() : port(0), ip(0){};
     Address(uint32_t ip, uint16_t port): port(port), ip(ip) {}
   };
 
@@ -125,11 +126,13 @@ protected:
     UUID syscall_id;
     uint32_t seqNum;
     uint32_t ackNum;
-    Sucket(PairKey pairKey, Address localAddr, uint8_t state): pairKey(pairKey), localAddr(localAddr), remoteAddr(localAddr), state(state) {}
+    Sucket() : state(TCP_CLOSED){}
+    Sucket(PairKey pairKey, TCP_STATE state) : pairKey(pairKey), state(state) {}
+    Sucket(PairKey pairKey, Address localAddr, TCP_STATE state): pairKey(pairKey), localAddr(localAddr), remoteAddr(localAddr), state(state) {}
   };
 
   // maps & set
-  std::unordered_map<PairKey, std::pair<sockaddr, socklen_t>> processToAddrInfo; 
+  std::unordered_map<PairKey, std::pair<sockaddr, socklen_t>> pairKeyToAddrInfo; 
   std::unordered_set<PairKey> pairKeySet;
   std::unordered_set<std::pair<uint32_t, uint16_t>> bindedAddress;
   std::unordered_map<PairKey, Sucket> pairKeyToSucket;  

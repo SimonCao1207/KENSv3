@@ -92,7 +92,7 @@ void TCPAssignment:: _sendPacket(Sucket sucket, uint8_t flag){
 }
 
 void TCPAssignment:: syscall_close(UUID syscallUUID, int pid, int sockfd){
-  std::pair<int, int> pairKey {sockfd, pid}; 
+  PairKey pairKey {sockfd, pid}; 
   if (pairKeySet.find(pairKey) == pairKeySet.end()){
     this->returnSystemCall(syscallUUID, -1);
     return; 
@@ -160,7 +160,8 @@ Packet* TCPAssignment::create_packet(struct Sucket& sucket, uint8_t flags) {
   // DEBUG
   std::cerr << "Creating packet from ip=" << sucket.localAddr.ip << ",port=" << sucket.localAddr.port << " to ip=" << sucket.remoteAddr.ip << ",port=" << sucket.remoteAddr.port << " with flags=" << flags << '\n';
 
-  Packet packet = Packet(100);
+  size_t packet_size = 100;
+  Packet packet (packet_size);
 
   uint8_t version_header_length = (4 << 4) + 20;
   packet.writeData(VERSION_HEADER_LENGTH_OFFSET, &version_header_length, VERSION_HEADER_LENGTH);
@@ -269,7 +270,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
 
 void TCPAssignment::timerCallback(std::any payload) {
   // Remove below
-  *payload = true;
+  // *payload = true;
 }
 
 } // namespace E
