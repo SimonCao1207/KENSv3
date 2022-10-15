@@ -148,9 +148,9 @@ protected:
   virtual void syscall_bind(UUID syscallUUID, int pid, int sockfd, struct sockaddr *addr, socklen_t addrlen) final;
   virtual void syscall_getsockname(UUID syscallUUID, int pid, int sockfd, struct sockaddr *addr, socklen_t* addrlen) final;
   virtual void syscall_connect(UUID syscallUUID, int pid, int sockfd, const struct sockaddr *addr, socklen_t addrlen) final;
-  virtual Packet* create_packet(struct Sucket&, uint8_t) final;
+  virtual Packet create_packet(struct Sucket&, uint8_t) final;
   virtual void syscall_close(UUID syscallUUID, int pid, int sockfd) final;
-  virtual void _sendPacket(Sucket sucket, uint8_t type) final;
+  virtual void _send_packet(Sucket& sucket, uint8_t type) final;
 }; 
 
 class TCPAssignmentProvider {

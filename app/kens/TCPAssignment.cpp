@@ -86,8 +86,9 @@ if (pairKeySet.find(pairKey) == pairKeySet.end() || pairKeyToAddrInfo.find(pairK
   this->returnSystemCall(syscallUUID, 0);
 }
 
-void TCPAssignment:: _sendPacket(Sucket sucket, uint8_t flag){
-  // TODO: Create a packet and send to IP layer
+void TCPAssignment:: _send_packet(Sucket& sucket, uint8_t flag){
+  Packet packet = create_packet(sucket, flag);
+  sendPacket(std::string("IPv4"), packet);
   return;
 }
 
@@ -103,12 +104,12 @@ void TCPAssignment:: syscall_close(UUID syscallUUID, int pid, int sockfd){
   switch (state)
   {
     case TCP_ESTABLISHED:
-      _sendPacket(sucket, TH_FIN | TH_ACK);
+      _send_packet(sucket, TH_FIN | TH_ACK);
       sucket.state = TCP_FIN_WAIT_1;
       break;
 
     case TCP_CLOSE_WAIT:
-      _sendPacket(sucket, TH_FIN | TH_ACK);
+      _send_packet(sucket, TH_FIN | TH_ACK);
       sucket.state = TCP_LAST_ACK;
       break;
     
@@ -149,13 +150,13 @@ void TCPAssignment::syscall_connect(UUID syscallUUID, int pid, int sockfd, const
   
   uint8_t flags = SYN_FLAG;
   
-  Packet* packet = create_packet(sucket, flags);
+  Packet packet = create_packet(sucket, flags);
 
   // bool timeout = false;
   // TCPAssignment::addTimer(&timeout, 1000000000);
 }
 
-Packet* TCPAssignment::create_packet(struct Sucket& sucket, uint8_t flags) {
+Packet TCPAssignment::create_packet(struct Sucket& sucket, uint8_t flags) {
   // packet data section = 0, currently not support data
   // DEBUG
   std::cerr << "Creating packet from ip=" << sucket.localAddr.ip << ",port=" << sucket.localAddr.port << " to ip=" << sucket.remoteAddr.ip << ",port=" << sucket.remoteAddr.port << " with flags=" << flags << '\n';
@@ -183,7 +184,9 @@ Packet* TCPAssignment::create_packet(struct Sucket& sucket, uint8_t flags) {
   packet.writeData(SEQ_NUM_OFFSET, &seq_num, SEQ_NUM_LENGTH);
 
   // skip ack_num
+
   packet.writeData(FLAGS_OFFSET, &flags, FLAGS_LENGTH);
+  
   // skip rwnd
 
   uint16_t zero_checksum = htons(0);
@@ -194,8 +197,10 @@ Packet* TCPAssignment::create_packet(struct Sucket& sucket, uint8_t flags) {
   uint16_t checksum = htons(~NetworkUtil::tcp_sum(source_ip, dest_ip, tcp_seg, length));
 
   packet.writeData(CHECKSUM_OFFSET, &checksum, CHECKSUM_LENGTH);
+  
+  // skip data
 
-  return &packet;
+  return packet;
 }
 
 void TCPAssignment::systemCallback(UUID syscallUUID, int pid,
