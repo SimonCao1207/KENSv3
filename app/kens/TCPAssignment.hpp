@@ -79,8 +79,10 @@ protected:
   };
   
   // typedef
-  typedef std::pair<int, int> PairKey; // (sockfd, id)
-  typedef std::pair<std::pair<uint32_t, uint16_t>, std::pair<uint32_t, uint16_t>> PairAddress; // <ip, port>, <ip,port> 
+  typedef std::pair<int, int> PairKey; // (sockfd, id) - sucketkey
+  typedef std::pair<uint32_t, uint16_t> Address; // (ip, port)
+  typedef std::pair<Address, Address> PairAddress; // localAddr, remoteAddr
+  typedef std::pair<sockaddr, socklen_t> AddressInfo; // (sockaddr, socklen_t)
 
   enum TCP_STATE {
     TCP_CLOSED,
@@ -97,13 +99,20 @@ protected:
     TCP_TIME_WAIT,
   }; 
 
-  // structs
-  struct Address {
-    uint16_t port;
-    uint32_t ip;
-    Address() : port(0), ip(0){};
-    Address(uint32_t ip, uint16_t port): port(port), ip(ip) {}
-  };
+  AddressInfo addrToAddrInfo(Address addr) {
+    sockaddr_in addr_in;
+    addr_in.sin_family = AF_INET;
+    addr_in.sin_addr.s_addr = htonl(addr.first);
+    addr_in.sin_port = htons(addr.second);
+    return AddressInfo{*((sockaddr *) &addr_in), sizeof(addr)};
+  }
+
+  Address addrInfoToAddr (std::pair<sockaddr, socklen_t> addrInfo) {  
+    sockaddr_in address = *((sockaddr_in *) &addrInfo.first);
+    uint32_t ip = ntohl(address.sin_addr.s_addr);
+    uint16_t port = ntohs(address.sin_port);
+    return std::make_pair(ip, port);
+  }
   
   struct BufferRcv {
     int bytesRcvd;
@@ -118,6 +127,10 @@ protected:
     int cwnd;
     std::queue<uint8_t> bufferData;
     BufferSnd(): bytesSnd(0), bytesAck(0), bufferData(std::queue<uint8_t>()) {}
+  };
+
+  struct ListenQueue {
+    std::queue<> incoming;
   };
 
   struct Sucket {
@@ -139,11 +152,10 @@ protected:
   };
 
   // maps & set
-  std::unordered_map<PairKey, std::pair<sockaddr, socklen_t>> pairKeyToAddrInfo; 
-  std::unordered_set<PairKey> pairKeySet;
-  std::unordered_set<std::pair<uint32_t, uint16_t>> bindedAddress;
+  std::unordered_map<PairKey, AddressInfo> pairKeyToAddrInfo; 
+  std::unordered_map<Address, PairKey> bindedAddress;
   std::unordered_map<PairKey, Sucket> pairKeyToSucket;  
-  std::unordered_map<PairAddress, Sucket> pairAddressToSucket;
+  std::unordered_map<PairAddress, PairKey> pairAddressToPairKey;
 
 
 
