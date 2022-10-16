@@ -179,9 +179,78 @@ void TCPAssignment::syscall_connect(UUID syscallUUID, int pid, int sockfd, const
       return;
     }
   }
+  TCPAssignment::cancelTimer(timerId);
 
   pairAddressToPairKey[{sucket.localAddr, sucket.remoteAddr}] = pairKey;
+  this->returnSystemCall(syscallUUID, 0);
+  return;
+}
+
+void TCPAssignment::syscall_listen(UUID syscallUUID, int pid, int sockfd, int backlog) {
+  //DEBUG
+  std::cout << "SYSCALL_LISTEN: Opening listen on sockfd=" << sockfd << ", backlog=" << backlog;
+
+  PairKey pairKey = {sockfd, pid};
+  if(pairKeyToSucket.find(pairKey) == pairKeyToSucket.end()) {
+    this->returnSystemCall(syscallUUID, -1);
+    return;
+  }
+
+  Sucket& sucket = pairKeyToSucket[pairKey];
+  Address localAddr = sucket.localAddr;
+  if(bindedAddress.find(localAddr) == bindedAddress.end() || bindedAddress[localAddr] != pairKey) {
+    this->returnSystemCall(syscallUUID, -1);
+    return;
+  }
+
+  //DEBUG
+  std::cout << "...Succeeded => listening on: local_ip=" << localAddr.first << ", local_port=" << localAddr.second << "\n";
+
+  if(sucket.state != TCP_LISTEN) {
+    sucket.listenQueue = ListenQueue(backlog);
+  } else {
+    sucket.listenQueue.capacity = backlog;
+  }
+  sucket.state = TCP_LISTEN;
+
+  this->returnSystemCall(syscallUUID, 0);
+}
+
+void TCPAssignment::syscall_accept(UUID syscallUUID, int pid, int sockfd, struct sockaddr* addr, socklen_t* addrlen) {
+  //DEBUG
+  std::cout << "SYSCALL_ACCEPT: accepting connection on sockfd=" << sockfd;
+
+  PairKey pairKey = {sockfd, pid};
+  if(pairKeyToSucket.find(pairKey) == pairKeyToSucket.end()) {
+    this->returnSystemCall(syscallUUID, -1);
+    return;
+  }
+
+  Sucket& sucket = pairKeyToSucket[pairKey];
+  Address incoming_addr = addrInfoToAddr(AddressInfo{*addr, *addrlen});
+  if(bindedAddress.find(incoming_addr) == bindedAddress.end() || bindedAddress[incoming_addr] != pairKey || sucket.state != TCP_LISTEN) {
+    this->returnSystemCall(syscallUUID, -1);
+    return;
+  }
+  
+  sucket.state = TPC_SYN_RCVD;
+  _send_packet(sucket, SYN_FLAG);
+
+  bool timeout = false;
+  UUID timerId = TCPAssignment::addTimer(&timeout, 1000000000);
+  while(sucket.state == TPC_SYN_RCVD) {
+    if(timeout) { // timeout => failed to connect
+      sucket.state = TCP_LISTEN;
+      this->returnSystemCall(syscallUUID, -1);
+      return;
+    }
+  }
   TCPAssignment::cancelTimer(timerId);
+
+  pairAddressToPairKey[PairAddress{sucket.localAddr, sucket.remoteAddr}] = pairKey;
+  // DEBUG
+  std::cout << "...succeeded => connection established: (source_ip=" << sucket.localAddr.first << ",source_port=" << sucket.localAddr.second << " and (dest_ip=" << sucket.remoteAddr.first << ",dest_port" << sucket.remoteAddr.second << "\n";
+
   this->returnSystemCall(syscallUUID, 0);
   return;
 }
@@ -265,14 +334,14 @@ void TCPAssignment::systemCallback(UUID syscallUUID, int pid,
         (socklen_t)std::get<int>(param.params[2]));
     break;
   case LISTEN:
-    // this->syscall_listen(syscallUUID, pid, std::get<int>(param.params[0]),
-    //                      std::get<int>(param.params[1]));
+    this->syscall_listen(syscallUUID, pid, std::get<int>(param.params[0]),
+                         std::get<int>(param.params[1]));
     break;
   case ACCEPT:
-    // this->syscall_accept(
-    //     syscallUUID, pid, std::get<int>(param.params[0]),
-    //     static_cast<struct sockaddr *>(std::get<void *>(param.params[1])),
-    //     static_cast<socklen_t *>(std::get<void *>(param.params[2])));
+    this->syscall_accept(
+        syscallUUID, pid, std::get<int>(param.params[0]),
+        static_cast<struct sockaddr *>(std::get<void *>(param.params[1])),
+        static_cast<socklen_t *>(std::get<void *>(param.params[2])));
     break;
   case BIND:
     this->syscall_bind(

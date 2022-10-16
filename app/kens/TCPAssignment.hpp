@@ -130,7 +130,10 @@ protected:
   };
 
   struct ListenQueue {
-    std::queue<> incoming;
+    int capacity;
+    std::queue<Address> incoming;
+    ListenQueue(): capacity(0), incoming(std::queue<Address>()) {}
+    ListenQueue(int capacity): capacity(capacity), incoming(std::queue<Address>()) {}
   };
 
   struct Sucket {
@@ -143,6 +146,7 @@ protected:
     UUID syscall_id;
     uint32_t seqNum;
     uint32_t ackNum;
+    ListenQueue listenQueue;
     Sucket() : state(TCP_CLOSED){}
     Sucket(PairKey pairKey, TCP_STATE state) : pairKey(pairKey), state(state) {}
     Sucket(PairKey pairKey, Address localAddr, TCP_STATE state): pairKey(pairKey), localAddr(localAddr), remoteAddr(localAddr), state(state) {
@@ -171,6 +175,8 @@ protected:
   virtual Packet create_packet(struct Sucket&, uint8_t) final;
   virtual void syscall_close(UUID syscallUUID, int pid, int sockfd) final;
   virtual void _send_packet(Sucket& sucket, uint8_t type) final;
+  virtual void syscall_listen(UUID syscallUUID, int pid, int sockfd, int backlog) final;
+  virtual void syscall_accept(UUID syscallUUID, int pid, int sockfd, struct sockaddr* addr, socklen_t* addrlen) final;
 }; 
 
 class TCPAssignmentProvider {
