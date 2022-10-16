@@ -167,6 +167,8 @@ void TCPAssignment::syscall_connect(UUID syscallUUID, int pid, int sockfd, const
   }
   // END: assign source address
 
+  sucket.seqNum = random_seqnum();
+
   _send_packet(sucket, SYN_FLAG);
   sucket.state = TCP_SYN_SENT;
 
@@ -220,20 +222,22 @@ void TCPAssignment::syscall_accept(UUID syscallUUID, int pid, int sockfd, struct
   //DEBUG
   std::cout << "SYSCALL_ACCEPT: accepting connection on sockfd=" << sockfd;
 
-  PairKey pairKey = {sockfd, pid};
-  if(pairKeyToSucket.find(pairKey) == pairKeyToSucket.end()) {
+  PairKey listener_pairKey = {sockfd, pid};
+  if(pairKeyToSucket.find(listener_pairKey) == pairKeyToSucket.end()) {
     this->returnSystemCall(syscallUUID, -1);
     return;
   }
+  Sucket& listener_sucket = pairKeyToSucket[listener_pairKey];
 
-  Sucket& sucket = pairKeyToSucket[pairKey];
   Address incoming_addr = addrInfoToAddr(AddressInfo{*addr, *addrlen});
-  if(bindedAddress.find(incoming_addr) == bindedAddress.end() || bindedAddress[incoming_addr] != pairKey || sucket.state != TCP_LISTEN) {
-    this->returnSystemCall(syscallUUID, -1);
-    return;
-  }
   
+  PairKey pairKey = {_syscall_socket(pid), pid};
+  Sucket& sucket = pairKeyToSucket[pairKey];
   sucket.state = TPC_SYN_RCVD;
+  sucket.localAddr = listener_sucket.localAddr;
+  sucket.remoteAddr = incoming_addr;
+  sucket.seqNum = random_seqnum();
+
   _send_packet(sucket, SYN_FLAG);
 
   bool timeout = false;
@@ -248,6 +252,7 @@ void TCPAssignment::syscall_accept(UUID syscallUUID, int pid, int sockfd, struct
   TCPAssignment::cancelTimer(timerId);
 
   pairAddressToPairKey[PairAddress{sucket.localAddr, sucket.remoteAddr}] = pairKey;
+  sucket.state = TCP_ESTABLISHED;
   // DEBUG
   std::cout << "...succeeded => connection established: (source_ip=" << sucket.localAddr.first << ",source_port=" << sucket.localAddr.second << " and (dest_ip=" << sucket.remoteAddr.first << ",dest_port" << sucket.remoteAddr.second << "\n";
 

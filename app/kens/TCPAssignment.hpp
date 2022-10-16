@@ -15,6 +15,7 @@
 #include <netinet/in.h>
 #include <netinet/ip.h>
 #include <netinet/tcp.h>
+#include <random>
 
 namespace E {
 
@@ -113,6 +114,10 @@ protected:
     uint16_t port = ntohs(address.sin_port);
     return std::make_pair(ip, port);
   }
+
+  uint32_t random_seqnum() {
+    return uint32_t(rand()) * uint32_t(rand()) + uint32_t(rand()) * uint32_t(rand()); 
+  }
   
   struct BufferRcv {
     int bytesRcvd;
@@ -149,7 +154,7 @@ protected:
     ListenQueue listenQueue;
     Sucket() : state(TCP_CLOSED){}
     Sucket(PairKey pairKey, TCP_STATE state) : pairKey(pairKey), state(state) {}
-    Sucket(PairKey pairKey, Address localAddr, TCP_STATE state): pairKey(pairKey), localAddr(localAddr), remoteAddr(localAddr), state(state) {
+    Sucket(PairKey pairKey, Address localAddr, Address remoteAddr, TCP_STATE state): pairKey(pairKey), localAddr(localAddr), remoteAddr(localAddr), state(state) {
       // Initialize random seq_num here
       seqNum = uint32_t(rand()) * uint32_t(rand()) * uint32_t(rand());
     }
