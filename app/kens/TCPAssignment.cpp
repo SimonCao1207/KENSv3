@@ -223,9 +223,10 @@ void TCPAssignment::syscall_listen(UUID syscallUUID, int pid, int sockfd, int ba
   std::cout << "...Succeeded => listening on: local_ip=" << localAddr.first << ", local_port=" << localAddr.second << "\n";
 
   if(sucket.state != TCP_LISTEN) {
-    sucket.listenQueue = ListenQueue(backlog);
+    ConnectionQueue newQueue = ConnectionQueue(backlog);
+    pairKeyToConnectionQueue[pairKey] = &newQueue;
   } else {
-    sucket.listenQueue.capacity = backlog;
+    pairKeyToConnectionQueue[pairKey]->capacity = backlog;
   }
   sucket.state = TCP_LISTEN;
 
@@ -235,6 +236,7 @@ void TCPAssignment::syscall_listen(UUID syscallUUID, int pid, int sockfd, int ba
 void TCPAssignment::syscall_accept(UUID syscallUUID, int pid, int sockfd, struct sockaddr* addr, socklen_t* addrlen) {
   //DEBUG
   std::cout << "SYSCALL_ACCEPT: accepting connection on sockfd=" << sockfd;
+  // end DEBUG
 
   PairKey listener_pairKey = {sockfd, pid};
   if(pairKeyToSucket.find(listener_pairKey) == pairKeyToSucket.end()) {
@@ -243,43 +245,36 @@ void TCPAssignment::syscall_accept(UUID syscallUUID, int pid, int sockfd, struct
   }
   Sucket& listener_sucket = pairKeyToSucket[listener_pairKey];
 
-  if(listener_sucket.listenQueue.incoming.empty()) {
+  if(listener_sucket.state != TCP_LISTEN) {
+    // DEBUG
+    std::cout << "...fail: sucket state should tcp_listen\n";
+    // end DEBUG
+
+    this->returnSystemCall(syscallUUID, -1);
+    return;
+  }
+  ConnectionQueue* connection_queue = pairKeyToConnectionQueue[listener_pairKey];
+  if(connection_queue->cqueue.empty()) {
+    // DEBUG
+    std::cout << "...fail: connection queue is empty\n";
+    // end DEBUG
+
     this->returnSystemCall(syscallUUID, -1);
     return;
   }
 
-  // (peer_addr, ack_num)
-  std::pair<Address, uint32_t> incoming_request= listener_sucket.listenQueue.incoming.front();
-  listener_sucket.listenQueue.incoming.pop();
+  Sucket* sucketPtr = connection_queue->cqueue.front(); 
+  connection_queue->cqueue.pop();
+
+  AddressInfo addrInfo = addrToAddrInfo(sucketPtr->remoteAddr);
+  *addr = addrInfo.first;
+  *addrlen = addrInfo.second;
   
-  PairKey pairKey = {_syscall_socket(pid), pid};
-  Sucket& sucket = pairKeyToSucket[pairKey];
-  sucket.state = TPC_SYN_RCVD;
-  sucket.localAddr = listener_sucket.localAddr;
-  sucket.remoteAddr = incoming_request.first;
-  sucket.seqNum = random_seqnum();
-  sucket.ackNum = incoming_request.second + 1;
-  handshaking[PairAddress{sucket.localAddr, sucket.remoteAddr}] = pairKey; 
-
-  _send_packet(sucket, SYN_FLAG);
-
-  bool timeout = false;
-  UUID timerId = TCPAssignment::addTimer(&timeout, 1000000000);
-  while(sucket.state == TPC_SYN_RCVD) {
-    if(timeout) { // timeout => failed to connect
-      sucket.state = TCP_LISTEN;
-      this->returnSystemCall(syscallUUID, -1);
-      return;
-    }
-  }
-  TCPAssignment::cancelTimer(timerId);
-
-  handshaking.erase(PairAddress{sucket.localAddr, sucket.remoteAddr});
-  pairAddressToPairKey[PairAddress{sucket.localAddr, sucket.remoteAddr}] = pairKey;
   // DEBUG
-  std::cout << "...succeeded => server connection established: (source_ip=" << sucket.localAddr.first << ",source_port=" << sucket.localAddr.second << " and (dest_ip=" << sucket.remoteAddr.first << ",dest_port" << sucket.remoteAddr.second << "\n";
+  std::cout << "...done => server connection accepted: (source_ip=" << sucketPtr->localAddr.first << ",source_port=" << sucketPtr->localAddr.second << " and (dest_ip=" << sucketPtr->remoteAddr.first << ",dest_port" << sucketPtr->remoteAddr.second << "\n";
+  // end DEBUG
 
-  this->returnSystemCall(syscallUUID, 0);
+  this->returnSystemCall(syscallUUID, sucketPtr->pairKey.first);
   return;
 }
 
@@ -310,7 +305,8 @@ Packet TCPAssignment::create_packet(struct Sucket& sucket, uint8_t flags = 0) {
   uint32_t seq_num = htonl(sucket.seqNum);
   packet.writeData(SEQ_NUM_OFFSET, &seq_num, SEQ_NUM_LENGTH);
 
-  // skip ack_num
+  uint32_t ack_num = htonl(sucket.ackNum);
+  packet.writeData(ACK_NUM_OFFSET, &ack_num, ACK_NUM_LENGTH);
 
   packet.writeData(FLAGS_OFFSET, &flags, FLAGS_LENGTH);
   
@@ -402,23 +398,47 @@ void TCPAssignment::_handle_SYN(Address sourceAddr, Address destAddr, uint32_t a
   std::cout << "This is SYN FLAG...";
   std::cout << "receiving packet from ip=" << sourceAddr.first << ",port=" << sourceAddr.second << " to ip=" << destAddr.first << ",port=" << destAddr.second;
 
-  if(bindedAddress.find(destAddr) == bindedAddress.end()) {
+  Address listening_zero_addr = destAddr; listening_zero_addr.first = 0;
+
+  if(bindedAddress.find(destAddr) == bindedAddress.end() && bindedAddress.find(listening_zero_addr) == bindedAddress.end()) {
     // DEBUG
     std::cout << "...no sucket binded to addr\n";
     return;
   }
 
-  Sucket& sucket = pairKeyToSucket[bindedAddress[destAddr]];
-  if(sucket.state != TCP_LISTEN || sucket.listenQueue.capacity < sucket.listenQueue.incoming.size() + 1) {
+  Sucket& listener_sucket = (bindedAddress.find(destAddr) == bindedAddress.end()) ? pairKeyToSucket[bindedAddress[listening_zero_addr]] : pairKeyToSucket[bindedAddress[destAddr]];
+  ConnectionQueue* connection_queue = pairKeyToConnectionQueue[listener_sucket.pairKey];
+  if(listener_sucket.state != TCP_LISTEN) {
     // DEBUG
-    std::cout << "...not listening state or queue full\n";
+    std::cout << "...not listening state\n";
     return;
-  } 
-  
-  sucket.listenQueue.incoming.push(std::make_pair(sourceAddr, ackNum));
+  }
+  if(handshaking.size() + connection_queue->cqueue.size() + 1 > connection_queue->capacity) {
+    // DEBUG
+    std::cout << "...listening queue overloaded\n";
+    return;
+  }
+
+  PairKey pairKey = {_syscall_socket(listener_sucket.pairKey.second), listener_sucket.pairKey.second};
+  Sucket& sucket = pairKeyToSucket[pairKey];
+  sucket.state = TPC_SYN_RCVD;
+  sucket.localAddr = destAddr;
+  sucket.remoteAddr = sourceAddr;
+  sucket.seqNum = random_seqnum();
+  sucket.ackNum = ackNum + 1;
+  sucket.parentPairKey = listener_sucket.pairKey;
+
+  _send_packet(sucket, SYN_FLAG | ACK_FLAG);
+
+  handshaking[PairAddress{sucket.localAddr, sucket.remoteAddr}] = pairKey;
+
+  // pairAddressToPairKey[PairAddress{sucket.localAddr, sucket.remoteAddr}] = pairKey;
 
   // DEBUG
-  std::cout << "...done\n";
+  std::cout << "...done: sent syn_ack_package, new socket (sockfd=" << pairKey.first << ",pid=" << pairKey.second << ") created...";
+  std::cout << "from (ip=" << destAddr.first << ",port=" << destAddr.second << ") to (ip=" << sourceAddr.first << "port=" << sourceAddr.second << ")\n";
+  // end DEBUG
+
   return;
 }
 
@@ -450,6 +470,8 @@ void TCPAssignment::_handle_SYN_ACK(Address sourceAddr, Address destAddr, uint32
 
   // DEBUG  
   std::cout << "...done: client connection established (" << sourceAddr.first << "," << sourceAddr.second << ") and (" << destAddr.first << "," << destAddr.second << ")\n";
+  // end DEBUG
+
   return;
 }
 
@@ -466,14 +488,18 @@ void TCPAssignment::_handle_ACK(Address sourceAddr, Address destAddr, uint32_t a
     sucket.seqNum += 1;
     sucket.ackNum = seqNum + 1;
   } else if(handshaking.find(pairAddress) != handshaking.end()) {
-    Sucket& sucket = pairKeyToSucket[handshaking[pairAddress]];
-    sucket.state = TCP_ESTABLISHED;
+    Sucket* sucketPtr = &pairKeyToSucket[handshaking[pairAddress]];
+    sucketPtr->state = TCP_ESTABLISHED;
+    ConnectionQueue* connection_queue = pairKeyToConnectionQueue[sucketPtr->parentPairKey];
+    connection_queue->cqueue.push(sucketPtr);
+    
+    // DEBUG
+    std::cout << "...done: connection ready to accept from (ip=" << sourceAddr.first << ",port=" << sourceAddr.second << ") to (ip=" << destAddr.first << ",port=" << destAddr.second << "\n";
+    // end DEBUG
   } else {
     // DEBUG
     std::cout << "...fail: connection not found\n";
-    return;
   }
-  std::cout << "...done\n";
 }
 
 void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
@@ -496,6 +522,13 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
   packet.readData(SOURCE_PORT_OFFSET, &source_port, SOURCE_PORT_LENGTH);
   packet.writeData(DEST_IP_OFFSET, &dest_ip, DEST_IP_LENGTH);
   packet.writeData(DEST_PORT_OFFSET, &dest_port, DEST_PORT_LENGTH);
+
+  seqNum = ntohl(seqNum);
+  ackNum = ntohl(ackNum);
+  source_ip = ntohl(source_ip);
+  source_port = ntohs(source_port);
+  dest_ip = ntohl(dest_ip);
+  dest_port = ntohs(dest_port);
   
   PairAddress pairAddress {{source_ip, source_port} , {dest_ip,dest_port}};
   Address sourceAddr = {source_ip, source_port};

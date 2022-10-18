@@ -134,24 +134,17 @@ protected:
     BufferSnd(): bytesSnd(0), bytesAck(0), bufferData(std::queue<uint8_t>()) {}
   };
 
-  struct ListenQueue {
-    int capacity;
-    std::queue<std::pair<Address, uint32_t>> incoming; // (incoming_addr, ack)
-    ListenQueue(): capacity(0), incoming(std::queue<std::pair<Address, uint32_t>>()) {}
-    ListenQueue(int capacity): capacity(capacity), incoming(std::queue<std::pair<Address, uint32_t>>()) {}
-  };
-
   struct Sucket {
     Address localAddr;
     Address remoteAddr;
     PairKey pairKey;
+    PairKey parentPairKey;
     BufferRcv bufferRcv;
     BufferSnd bufferSnd;
     TCP_STATE state = TCP_CLOSED;
     UUID syscall_id;
     uint32_t seqNum;
     uint32_t ackNum;
-    ListenQueue listenQueue;
     Sucket() : state(TCP_CLOSED){}
     Sucket(PairKey pairKey, TCP_STATE state) : pairKey(pairKey), state(state) {}
     Sucket(PairKey pairKey, Address localAddr, Address remoteAddr, TCP_STATE state): pairKey(pairKey), localAddr(localAddr), remoteAddr(localAddr), state(state) {
@@ -160,12 +153,20 @@ protected:
     }
   };
 
+  struct ConnectionQueue {
+    int capacity;
+    std::queue<Sucket*> cqueue; // (incoming_addr, ack)
+    ConnectionQueue(): capacity(0), cqueue(std::queue<Sucket*>()) {}
+    ConnectionQueue(int capacity): capacity(capacity), cqueue(std::queue<Sucket*>()) {}
+  };
+
   // maps & set
   std::unordered_map<PairKey, AddressInfo> pairKeyToAddrInfo; 
   std::unordered_map<Address, PairKey> bindedAddress;
   std::unordered_map<PairKey, Sucket> pairKeyToSucket;  
   std::unordered_map<PairAddress, PairKey> pairAddressToPairKey;
   std::unordered_map<PairAddress, PairKey> handshaking;
+  std::unordered_map<PairKey, ConnectionQueue*> pairKeyToConnectionQueue;
 
 
   virtual void systemCallback(UUID syscallUUID, int pid,
