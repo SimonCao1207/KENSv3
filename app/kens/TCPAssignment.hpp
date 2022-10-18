@@ -136,9 +136,9 @@ protected:
 
   struct ListenQueue {
     int capacity;
-    std::queue<Address> incoming;
-    ListenQueue(): capacity(0), incoming(std::queue<Address>()) {}
-    ListenQueue(int capacity): capacity(capacity), incoming(std::queue<Address>()) {}
+    std::queue<std::pair<Address, uint32_t>> incoming; // (incoming_addr, ack)
+    ListenQueue(): capacity(0), incoming(std::queue<std::pair<Address, uint32_t>>()) {}
+    ListenQueue(int capacity): capacity(capacity), incoming(std::queue<std::pair<Address, uint32_t>>()) {}
   };
 
   struct Sucket {
@@ -147,7 +147,7 @@ protected:
     PairKey pairKey;
     BufferRcv bufferRcv;
     BufferSnd bufferSnd;
-    TCP_STATE state;
+    TCP_STATE state = TCP_CLOSED;
     UUID syscall_id;
     uint32_t seqNum;
     uint32_t ackNum;
@@ -165,7 +165,7 @@ protected:
   std::unordered_map<Address, PairKey> bindedAddress;
   std::unordered_map<PairKey, Sucket> pairKeyToSucket;  
   std::unordered_map<PairAddress, PairKey> pairAddressToPairKey;
-
+  std::unordered_map<PairAddress, PairKey> handshaking;
 
 
   virtual void systemCallback(UUID syscallUUID, int pid,
@@ -182,6 +182,9 @@ protected:
   virtual void _send_packet(Sucket& sucket, uint8_t type) final;
   virtual void syscall_listen(UUID syscallUUID, int pid, int sockfd, int backlog) final;
   virtual void syscall_accept(UUID syscallUUID, int pid, int sockfd, struct sockaddr* addr, socklen_t* addrlen) final;
+  virtual void _handle_SYN(Address sourceAddr, Address destAddr, uint32_t ackNum) final;
+  virtual void _handle_SYN_ACK(Address sourceAddr, Address destAddr, uint32_t ackNum, uint32_t seqNum) final;
+  virtual void _handle_ACK(Address sourceAddr, Address destAddr, uint32_t ackNum, uint32_t seqNum) final;
 }; 
 
 class TCPAssignmentProvider {
