@@ -79,6 +79,23 @@ void TCPAssignment:: syscall_bind( UUID syscallUUID, int pid, int sockfd, struct
   this->returnSystemCall(syscallUUID, _syscall_bind(sockfd, pid, addr, addrlen));
 }
 
+int TCPAssignment::_syscall_getpeername(int sockfd, int pid, struct sockaddr * addr, socklen_t * addrlen){
+  PairKey pairKey {sockfd, pid};
+  Sucket sucket = pairKeyToSucket[pairKey];
+  if (pairKeyToSucket.find(pairKey) == pairKeyToSucket.end()){
+    return -1;
+  }
+  AddressInfo addrInfo = addrToAddrInfo(sucket.remoteAddr);
+  *addr = addrInfo.first;
+  *addrlen = addrInfo.second;
+  return 0;
+}
+
+
+void TCPAssignment:: syscall_getpeername(UUID syscallUUID, int pid, int sockfd, struct sockaddr * addr, socklen_t * addrlen){
+  return this->returnSystemCall(syscallUUID, _syscall_getpeername(sockfd, pid, addr, addrlen));
+}
+
 void TCPAssignment:: syscall_getsockname( UUID syscallUUID, int pid, int sockfd, struct sockaddr *addr, socklen_t* addrlen) {
   PairKey pairKey {sockfd, pid};
   if (pairKeyToSucket.find(pairKey) == pairKeyToSucket.end()){
@@ -160,15 +177,11 @@ void TCPAssignment::syscall_connect(UUID syscallUUID, int pid, int sockfd, const
     return;
   }
 
-  // START: assign destination address
-  sockaddr_in addr_in = * ((sockaddr_in*) addr);
-  uint32_t dest_ip = ntohl(addr_in.sin_addr.s_addr);
-  uint16_t dest_port = ntohs(addr_in.sin_port);
-  sucket.remoteAddr = Address(dest_ip, dest_port);
-  // END: assign destination address
+  // Assign remote address for Sucket
+  sucket.remoteAddr =  addrInfoToAddr(AddressInfo(*addr, addrlen));
 
-  // START: assign source address
-  ipv4_t ipv4_dest_ip = NetworkUtil::UINT64ToArray<std::size_t(4)>(dest_ip);
+  // START: Assign source address for Sucket
+  ipv4_t ipv4_dest_ip = NetworkUtil::UINT64ToArray<std::size_t(4)>(sucket.remoteAddr.first);
   int NIC_port = getRoutingTable(ipv4_dest_ip);
   std::optional<ipv4_t> ipv4_local_ip_opt = getIPAddr(NIC_port);
 
@@ -189,7 +202,6 @@ void TCPAssignment::syscall_connect(UUID syscallUUID, int pid, int sockfd, const
   }
   // END: assign source address
 
-  sucket.seqNum = random_seqnum();
   PairAddress pairAddress = {sucket.localAddr, sucket.remoteAddr};
   handshaking[pairAddress] = pairKey;
 
@@ -231,6 +243,7 @@ void TCPAssignment::syscall_listen(UUID syscallUUID, int pid, int sockfd, int ba
     return;
   }
 
+  // Does it need to check sucket state Listen ?
   if(sucket.state != TCP_LISTEN) {
     ConnectionQueue newQueue = ConnectionQueue(backlog);
     pairKeyToConnectionQueue[pairKey] = newQueue;
@@ -296,10 +309,8 @@ void TCPAssignment::syscall_accept(UUID syscallUUID, int pid, int sockfd, struct
   Sucket* sucketPtr = connection_queue.cqueue.front(); 
   connection_queue.cqueue.pop();
 
-  AddressInfo addrInfo = addrToAddrInfo(sucketPtr->remoteAddr);
-  *addr = addrInfo.first;
-  *addrlen = addrInfo.second;
-  
+  _syscall_getpeername(sucketPtr->pairKey.first, sucketPtr->pairKey.second, addr, addrlen);
+
   // DEBUG
   std::cout << "...done => server connection accepted: (source_ip=" << sucketPtr->localAddr.first << ",source_port=" << sucketPtr->localAddr.second << " and (dest_ip=" << sucketPtr->remoteAddr.first << ",dest_port" << sucketPtr->remoteAddr.second << ")\n";
   // end DEBUG
@@ -415,10 +426,10 @@ void TCPAssignment::systemCallback(UUID syscallUUID, int pid,
         static_cast<socklen_t *>(std::get<void *>(param.params[2])));
     break;
   case GETPEERNAME:
-    // this->syscall_getpeername(
-        // syscallUUID, pid, std::get<int>(param.params[0]),
-        // static_cast<struct sockaddr *>(std::get<void *>(param.params[1])),
-        // static_cast<socklen_t *>(std::get<void *>(param.params[2])));
+    this->syscall_getpeername(
+        syscallUUID, pid, std::get<int>(param.params[0]),
+        static_cast<struct sockaddr *>(std::get<void *>(param.params[1])),
+        static_cast<socklen_t *>(std::get<void *>(param.params[2])));
     break;
   default:
     assert(0);
@@ -457,7 +468,6 @@ void TCPAssignment::_handle_SYN(Address sourceAddr, Address destAddr, uint32_t s
   sucket.state = TPC_SYN_RCVD;
   sucket.localAddr = destAddr;
   sucket.remoteAddr = sourceAddr;
-  sucket.seqNum = random_seqnum();
   sucket.ackNum = seqNum + 1;
   sucket.parentPairKey = listener_sucket.pairKey;
   subBindedAddress[sucket.localAddr] = pairKey;
@@ -479,7 +489,7 @@ void TCPAssignment::_handle_SYN(Address sourceAddr, Address destAddr, uint32_t s
 void TCPAssignment::_handle_SYN_ACK(Address sourceAddr, Address destAddr, uint32_t ackNum, uint32_t seqNum) {
   // DEBUG
   std::cout << "This is SYN|ACK FLAG...";
-  std::cout << "receiving packet from ip=" << sourceAddr.first << ",port=" << sourceAddr.second;
+  std::cout << "receiving packet from ip=" << sourceAddr.first << ",port=" << sourceAddr.second << "\n";
 
   PairAddress pairAddress = {destAddr, sourceAddr};
   if(handshaking.find(pairAddress) == handshaking.end()) {
