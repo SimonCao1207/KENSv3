@@ -66,18 +66,15 @@ protected:
   #define OPTIONS_LENGTH 4
   #define DATA_LENGTH 4
 
+  # define FIN_FLAG	0x01
+  # define SYN_FLAG	0x02
+  # define RST_FLAG	0x04
+  # define PSH_FLAG	0x08
+  # define ACK_FLAG	0x10
+  # define URG_FLAG	0x20
+
   // constants
-  
-  enum FLAG {
-    CWR_FLAG = (1 << 7),
-    ECE_FLAG = (1 << 6),
-    URG_FLAG = (1 << 5),
-    ACK_FLAG = (1 << 4),
-    PSH_FLAG = (1 << 3),
-    RST_FLAG = (1 << 2),
-    SYN_FLAG = (1 << 1),
-    FIN_FLAG = (1 << 0),
-  };
+
   
   // typedef
   typedef std::pair<int, int> PairKey; // (sockfd, id) - sucketkey
@@ -105,7 +102,7 @@ protected:
     addr_in.sin_family = AF_INET;
     addr_in.sin_addr.s_addr = htonl(addr.first);
     addr_in.sin_port = htons(addr.second);
-    return AddressInfo{*((sockaddr *) &addr_in), sizeof(addr)};
+    return AddressInfo{*((sockaddr *) &addr_in), sizeof(addr_in)};
   }
 
   Address addrInfoToAddr (std::pair<sockaddr, socklen_t> addrInfo) {  
@@ -141,7 +138,7 @@ protected:
     PairKey parentPairKey;
     BufferRcv bufferRcv;
     BufferSnd bufferSnd;
-    TCP_STATE state = TCP_CLOSED;
+    TCP_STATE state;
     UUID syscall_id;
     uint32_t seqNum;
     uint32_t ackNum;
@@ -155,7 +152,7 @@ protected:
 
   struct ConnectionQueue {
     int capacity;
-    std::queue<Sucket*> cqueue; // (incoming_addr, ack)
+    std::queue<Sucket*> cqueue;
     ConnectionQueue(): capacity(0), cqueue(std::queue<Sucket*>()) {}
     ConnectionQueue(int capacity): capacity(capacity), cqueue(std::queue<Sucket*>()) {}
   };
@@ -166,7 +163,7 @@ protected:
   std::unordered_map<PairKey, Sucket> pairKeyToSucket;  
   std::unordered_map<PairAddress, PairKey> pairAddressToPairKey;
   std::unordered_map<PairAddress, PairKey> handshaking;
-  std::unordered_map<PairKey, ConnectionQueue*> pairKeyToConnectionQueue;
+  std::unordered_map<PairKey, ConnectionQueue> pairKeyToConnectionQueue;
 
 
   virtual void systemCallback(UUID syscallUUID, int pid,
