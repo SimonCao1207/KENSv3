@@ -153,7 +153,7 @@ protected:
     }
   };
 
-  struct ConnectionQueue {
+  struct ConnectionQueue { // queue of established connection ready for accept (from server)
     int capacity;
     std::queue<Sucket*> cqueue;
     ConnectionQueue(): capacity(0), cqueue(std::queue<Sucket*>()) {}
@@ -162,11 +162,11 @@ protected:
 
   // maps & set
   // std::unordered_map<PairKey, AddressInfo> pairKeyToAddrInfo; 
-  std::unordered_map<Address, PairKey> bindedAddress;
-  std::unordered_map<Address, PairKey> subBindedAddress;
+  std::unordered_map<Address, PairKey> bindedAddress; // directly binded suckets (server listener or client connector)
+  std::unordered_map<Address, PairKey> subBindedAddress; // children-suckets of server listener (each listener spawn new child-sucket when handle SYN packet)
   std::unordered_map<PairKey, Sucket> pairKeyToSucket;  
   std::unordered_map<PairAddress, PairKey> pairAddressToPairKey;
-  std::unordered_map<PairAddress, PairKey> handshaking;
+  std::unordered_map<PairAddress, PairKey> handshaking; // map from pairAddr to sucket which is currently in handshaking state (not established)
   std::unordered_map<PairKey, ConnectionQueue> pairKeyToConnectionQueue;
 
 
