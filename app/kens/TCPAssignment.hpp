@@ -108,17 +108,13 @@ protected:
     return AddressInfo{*((sockaddr *) &addr_in), len};
   }
 
-  Address addrInfoToAddr (std::pair<sockaddr, socklen_t> addrInfo) {  
+  Address addrInfoToAddr (AddressInfo addrInfo) {  
     sockaddr_in address = *((sockaddr_in *) &addrInfo.first);
     uint32_t ip = ntohl(address.sin_addr.s_addr);
     uint16_t port = ntohs(address.sin_port);
     return std::make_pair(ip, port);
   }
 
-  uint32_t random_seqnum() {
-    return uint32_t(rand()) * uint32_t(rand()) + uint32_t(rand()) * uint32_t(rand()); 
-  }
-  
   struct BufferRcv {
     int bytesRcvd;
     int bytesAck;
@@ -146,11 +142,11 @@ protected:
     uint32_t seqNum;
     uint32_t ackNum;
     Sucket() : state(TCP_CLOSED){}
-    Sucket(PairKey pairKey, TCP_STATE state) : pairKey(pairKey), state(state) {}
-    Sucket(PairKey pairKey, Address localAddr, Address remoteAddr, TCP_STATE state): pairKey(pairKey), localAddr(localAddr), remoteAddr(localAddr), state(state) {
+    Sucket(PairKey pairKey, TCP_STATE state) : pairKey(pairKey), state(state) {
       // Initialize random seq_num here
-      seqNum = uint32_t(rand()) * uint32_t(rand()) * uint32_t(rand());
+      seqNum = uint32_t(rand()) * uint32_t(rand()) + uint32_t(rand()) * uint32_t(rand());
     }
+    Sucket(PairKey pairKey, Address localAddr, Address remoteAddr, TCP_STATE state): pairKey(pairKey), localAddr(localAddr), remoteAddr(localAddr), state(state) {}
   };
 
   struct ConnectionQueue { // queue of established connection ready for accept (from server)
@@ -184,6 +180,8 @@ protected:
   virtual void _send_packet(Sucket& sucket, uint8_t type) final;
   virtual void syscall_listen(UUID syscallUUID, int pid, int sockfd, int backlog) final;
   virtual void syscall_accept(UUID syscallUUID, int pid, int sockfd, struct sockaddr* addr, socklen_t* addrlen) final;
+  virtual int _syscall_getpeername(int sockfd, int pid, struct sockaddr * addr, socklen_t * addrlen) final;
+  virtual void syscall_getpeername(UUID syscallUUID, int pid, int sockfd, struct sockaddr * addr, socklen_t * addrlen) final;
   virtual void _handle_SYN(Address sourceAddr, Address destAddr, uint32_t ackNum) final;
   virtual void _handle_SYN_ACK(Address sourceAddr, Address destAddr, uint32_t ackNum, uint32_t seqNum) final;
   virtual void _handle_ACK(Address sourceAddr, Address destAddr, uint32_t ackNum, uint32_t seqNum) final;
