@@ -187,6 +187,8 @@ protected:
   virtual void _handle_SYN(Address sourceAddr, Address destAddr, uint32_t ackNum) final;
   virtual void _handle_SYN_ACK(Address sourceAddr, Address destAddr, uint32_t ackNum, uint32_t seqNum) final;
   virtual void _handle_ACK(Address sourceAddr, Address destAddr, uint32_t ackNum, uint32_t seqNum) final;
+  virtual void _handle_FIN(Address sourceAddr, Address destAddr, uint32_t seqNum) final;
+  virtual void _handle_FIN_ACK(Address sourceAddr, Address destAddr, uint32_t seqNum) final;
 }; 
 
 class TCPAssignmentProvider {
