@@ -70,8 +70,8 @@ void TCPAssignment:: syscall_bind( UUID syscallUUID, int pid, int sockfd, struct
     return;
   }
   Sucket& sucket = pairKeyToSucket[pairKey];
-  Address address = addrInfoToAddr(AddressInfo{*addr, addrlen});
-  if(bindedAddress.find(address) != bindedAddress.end()) {
+  Address address = addrInfoToAddr(addrToAddrInfo(sucket.localAddr));
+  if(bindedAddress.find(address) != bindedAddress.end() || subBindedAddress.find(address) != subBindedAddress.end()) {
     this->returnSystemCall(syscallUUID, -1);
     return;
   }
@@ -93,7 +93,7 @@ void TCPAssignment:: syscall_getsockname( UUID syscallUUID, int pid, int sockfd,
   }
 
   AddressInfo addrInfo = addrToAddrInfo(sucket.localAddr);
-
+  
   *addr = addrInfo.first;
   *addrlen = addrInfo.second;
 

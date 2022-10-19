@@ -99,10 +99,13 @@ protected:
 
   AddressInfo addrToAddrInfo(Address addr) {
     sockaddr_in addr_in;
+    socklen_t len = sizeof(addr_in);
+    memset(&addr_in, 0, len);
+
     addr_in.sin_family = AF_INET;
     addr_in.sin_addr.s_addr = htonl(addr.first);
     addr_in.sin_port = htons(addr.second);
-    return AddressInfo{*((sockaddr *) &addr_in), sizeof(addr_in)};
+    return AddressInfo{*((sockaddr *) &addr_in), len};
   }
 
   Address addrInfoToAddr (std::pair<sockaddr, socklen_t> addrInfo) {  
