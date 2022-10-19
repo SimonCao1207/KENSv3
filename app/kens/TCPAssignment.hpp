@@ -158,8 +158,9 @@ protected:
   };
 
   // maps & set
-  std::unordered_map<PairKey, AddressInfo> pairKeyToAddrInfo; 
+  // std::unordered_map<PairKey, AddressInfo> pairKeyToAddrInfo; 
   std::unordered_map<Address, PairKey> bindedAddress;
+  std::unordered_map<Address, PairKey> subBindedAddress;
   std::unordered_map<PairKey, Sucket> pairKeyToSucket;  
   std::unordered_map<PairAddress, PairKey> pairAddressToPairKey;
   std::unordered_map<PairAddress, PairKey> handshaking;

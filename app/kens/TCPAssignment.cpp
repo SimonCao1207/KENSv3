@@ -54,7 +54,7 @@ int TCPAssignment:: _syscall_bind(int sockfd, int pid, struct sockaddr *addr, so
   // DEBUG
   std::cout << "Binding (sockfd=" << sockfd << ",pid=" << pid << ") at (ip=" << currAddress.first << ",port=" << currAddress.second << "\n"; 
   
-  pairKeyToAddrInfo[pairKey] = addrInfo;
+  // pairKeyToAddrInfo[pairKey] = addrInfo;
   bindedAddress[currAddress] = pairKey;
 
   Sucket& sucket = pairKeyToSucket[pairKey];
@@ -65,22 +65,37 @@ int TCPAssignment:: _syscall_bind(int sockfd, int pid, struct sockaddr *addr, so
 
 void TCPAssignment:: syscall_bind( UUID syscallUUID, int pid, int sockfd, struct sockaddr *addr, socklen_t addrlen){
   std::pair<int, int> pairKey = {sockfd, pid};
-  if (pairKeyToSucket.find(pairKey) == pairKeyToSucket.end() || pairKeyToAddrInfo.count(pairKey)){
+  if (pairKeyToSucket.find(pairKey) == pairKeyToSucket.end()){
     this->returnSystemCall(syscallUUID, -1);
     return;
   }
+  Sucket& sucket = pairKeyToSucket[pairKey];
+  Address address = addrInfoToAddr(AddressInfo{*addr, addrlen});
+  if(bindedAddress.find(address) != bindedAddress.end()) {
+    this->returnSystemCall(syscallUUID, -1);
+    return;
+  }
+
   this->returnSystemCall(syscallUUID, _syscall_bind(sockfd, pid, addr, addrlen));
 }
 
 void TCPAssignment:: syscall_getsockname( UUID syscallUUID, int pid, int sockfd, struct sockaddr *addr, socklen_t* addrlen) {
   PairKey pairKey {sockfd, pid};
-  if (pairKeyToSucket.find(pairKey) == pairKeyToSucket.end() || pairKeyToAddrInfo.find(pairKey) == pairKeyToAddrInfo.end()){
+  if (pairKeyToSucket.find(pairKey) == pairKeyToSucket.end()){
     this->returnSystemCall(syscallUUID, -1);
     return;
   }
 
-  *addr = pairKeyToAddrInfo[pairKey].first;
-  *addrlen = pairKeyToAddrInfo[pairKey].second;
+  Sucket& sucket = pairKeyToSucket[pairKey];
+  if(bindedAddress.find(sucket.localAddr) == bindedAddress.end() && subBindedAddress.find(sucket.localAddr) == subBindedAddress.end()) {
+    this->returnSystemCall(syscallUUID, -1);
+    return;
+  }
+
+  AddressInfo addrInfo = addrToAddrInfo(sucket.localAddr);
+
+  *addr = addrInfo.first;
+  *addrlen = addrInfo.second;
 
   this->returnSystemCall(syscallUUID, 0);
 }
@@ -114,11 +129,8 @@ void TCPAssignment:: syscall_close(UUID syscallUUID, int pid, int sockfd){
       break;
     
     default:
-      if (pairKeyToAddrInfo.find(pairKey) != pairKeyToAddrInfo.end()){
-        std::pair<sockaddr, socklen_t> addrInfo = pairKeyToAddrInfo[pairKey];
-        std::pair<uint32_t, uint16_t> addr = addrInfoToAddr(addrInfo);
-        bindedAddress.erase(addr);
-        pairKeyToAddrInfo.erase(pairKey);
+      if (bindedAddress.find(sucket.localAddr) != bindedAddress.end()){
+        bindedAddress.erase(sucket.localAddr);
       }
       pairKeyToSucket.erase(pairKey);
       pairAddressToPairKey.erase(pairAddress);
@@ -422,6 +434,7 @@ void TCPAssignment::_handle_SYN(Address sourceAddr, Address destAddr, uint32_t s
   if(bindedAddress.find(destAddr) == bindedAddress.end() && bindedAddress.find(listening_zero_addr) == bindedAddress.end()) {
     // DEBUG
     std::cout << "handlesyn...no sucket binded to addr\n";
+    // end DEBUG
     return;
   }
 
@@ -447,6 +460,7 @@ void TCPAssignment::_handle_SYN(Address sourceAddr, Address destAddr, uint32_t s
   sucket.seqNum = random_seqnum();
   sucket.ackNum = seqNum + 1;
   sucket.parentPairKey = listener_sucket.pairKey;
+  subBindedAddress[sucket.localAddr] = pairKey;
 
   _send_packet(sucket, SYN_FLAG | ACK_FLAG);
 
