@@ -136,7 +136,7 @@ void TCPAssignment:: _send_packet(Sucket& sucket, uint8_t flag){
 void TCPAssignment:: syscall_close(UUID syscallUUID, int pid, int sockfd){
 
   // DEBUG
-    // std::cout << "SYSCALL_CLOSE: closing sockfd=" << sockfd << ",pid=" << pid<<"\n" << std::flush;
+    std::cout << "SYSCALL_CLOSE: closing sockfd=" << sockfd << ",pid=" << pid<<"\n" << std::flush;
   // end DEBUG
 
   PairKey pairKey {sockfd, pid};
@@ -164,7 +164,7 @@ void TCPAssignment:: syscall_close(UUID syscallUUID, int pid, int sockfd){
   }
 
   // DEBUG
-    // std::cout << "sended FIN_ACK packet, state = TCP_FIN_WAIT_1\n" << std::flush;
+    std::cout << "sended FIN_ACK packet, state = TCP_FIN_WAIT_1\n" << std::flush;
   // end DEBUG
 }
 
@@ -307,7 +307,7 @@ void TCPAssignment::syscall_accept(UUID syscallUUID, int pid, int sockfd, struct
     listener_sucket.pendingAccept.isPending = true;
     listener_sucket.pendingAccept.syscallUUID = syscallUUID;
     listener_sucket.pendingAccept.addr = addr;
-    listener_sucket.pendingAccept.isPending = addrlen;
+    listener_sucket.pendingAccept.addrlen = addrlen;
     return;
   }
 
@@ -455,6 +455,29 @@ void TCPAssignment::_handle_SYN(Address sourceAddr, Address destAddr, uint32_t s
     std::cout << "This is SYN FLAG\n" << std::flush;
   // end DEBUG
 
+  // check simultaneousConnect
+  PairAddress pairAddress = PairAddress{destAddr, sourceAddr};
+  if(handshaking.find(pairAddress) != handshaking.end()) {
+    // DEBUG
+      std::cout << "Simultaneous connection...";
+    // end DEBUG
+    PairKey pairKey = handshaking[pairAddress];
+    Sucket& sucket = pairKeyToSucket[pairKey];
+    if(sucket.state == TCP_SYN_SENT) {
+      sucket.state = TCP_SYN_RCVD;
+      sucket.localAddr = destAddr;
+      sucket.remoteAddr = sourceAddr;
+      sucket.ackNum = seqNum + 1;
+      _send_packet(sucket, SYN_FLAG | ACK_FLAG);
+      subBindedAddress[sucket.localAddr] = pairKey;
+
+      // DEBUG
+        std::cout << "Sent SYN_ACK packet for simultaneous connection\n";
+      // end DEBUG
+    }
+    return;
+  }
+
   Address listening_zero_addr = destAddr; listening_zero_addr.first = 0;
 
   if(bindedAddress.find(destAddr) == bindedAddress.end() && bindedAddress.find(listening_zero_addr) == bindedAddress.end()) {
@@ -520,15 +543,28 @@ void TCPAssignment::_handle_SYN_ACK(Address sourceAddr, Address destAddr, uint32
   }
 
   Sucket& sucket = pairKeyToSucket[handshaking[pairAddress]];
-  if(sucket.state != TCP_SYN_SENT || ackNum != sucket.seqNum + 1) {
+  if(sucket.state == TCP_SYN_RCVD) {
+    // DEBUG  
+      std::cout << "Simultaneous connection handle synack..." << std::flush;
+    // end DEBUG
+    sucket.state = TCP_ESTABLISHED;
+    sucket.ackNum = seqNum + 1;
+    pairAddressToPairKey[pairAddress] = handshaking[pairAddress];
+    handshaking.erase(pairAddress);
+    // DEBUG  
+      std::cout << "connected\n" << std::flush;
+    // end DEBUG
+    return;
+  }
+  else if(sucket.state != TCP_SYN_SENT || ackNum != sucket.seqNum + 1) {
     // DEBUG  
       std::cout << "handle syn/ack fail: sucket state must be TCP_SYN_SENT or wrong ackNum=" << (ackNum != sucket.seqNum + 1) << '\n';
     // end DEBUG
     return;
   }
+
   sucket.state = TCP_ESTABLISHED;
   sucket.ackNum = seqNum + 1;
-  sucket.seqNum += 1;
   
   _send_packet(sucket, ACK_FLAG);
   pairAddressToPairKey[pairAddress] = handshaking[pairAddress];
@@ -579,6 +615,7 @@ void TCPAssignment::_handle_ACK(Address sourceAddr, Address destAddr, uint32_t a
     std::cout << "...done: connection ready to accept from (ip=" << sourceAddr.first << ",port=" << sourceAddr.second << ") to (ip=" << destAddr.first << ",port=" << destAddr.second;
     // end DEBUG
 
+    // FIX HERE
     PairKey parentPairKey = currSucket.parentPairKey;
     Sucket& parentSucket = pairKeyToSucket[parentPairKey];
     if(parentSucket.pendingAccept.isPending) {
