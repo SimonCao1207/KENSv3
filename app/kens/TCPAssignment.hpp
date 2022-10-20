@@ -65,7 +65,6 @@ protected:
   #define URGDATA_LENGTH 2
   #define OPTIONS_LENGTH 4
   #define DATA_LENGTH 4
-
   # define FIN_FLAG	0x01
   # define SYN_FLAG	0x02
   # define RST_FLAG	0x04
@@ -86,7 +85,7 @@ protected:
     TCP_CLOSED,
     TCP_LISTEN,
     TCP_SYN_SENT,
-    TPC_SYN_RCVD,
+    TCP_SYN_RCVD,
     TCP_ESTABLISHED,
     TCP_CLOSE_WAIT,
     TCP_LAST_ACK,
@@ -114,7 +113,6 @@ protected:
     uint16_t port = ntohs(address.sin_port);
     return std::make_pair(ip, port);
   }
-
   struct BufferRcv {
     int bytesRcvd;
     int bytesAck;
@@ -164,7 +162,6 @@ protected:
   std::unordered_map<PairAddress, PairKey> pairAddressToPairKey;
   std::unordered_map<PairAddress, PairKey> handshaking; // map from pairAddr to sucket which is currently in handshaking state (not established)
   std::unordered_map<PairKey, ConnectionQueue> pairKeyToConnectionQueue;
-
 
   virtual void systemCallback(UUID syscallUUID, int pid,
                               const SystemCallParameter &param) final;
