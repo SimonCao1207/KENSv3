@@ -128,6 +128,14 @@ protected:
     BufferSnd(): bytesSnd(0), bytesAck(0), bufferData(std::queue<uint8_t>()) {}
   };
 
+  struct PendingAccept {
+    bool isPending;
+    UUID syscallUUID;
+    struct sockaddr * addr;
+    socklen_t * addrlen;
+    PendingAccept(): isPending(false) {}
+  };
+
   struct Sucket {
     Address localAddr;
     Address remoteAddr;
@@ -139,6 +147,7 @@ protected:
     UUID syscall_id;
     uint32_t seqNum;
     uint32_t ackNum;
+    PendingAccept pendingAccept;
     Sucket() : state(TCP_CLOSED){}
     Sucket(PairKey pairKey, TCP_STATE state) : pairKey(pairKey), state(state) {
       // Initialize random seq_num here
@@ -149,9 +158,9 @@ protected:
 
   struct ConnectionQueue { // queue of established connection ready for accept (from server)
     int capacity;
-    std::queue<Sucket*> cqueue;
-    ConnectionQueue(): capacity(0), cqueue(std::queue<Sucket*>()) {}
-    ConnectionQueue(int capacity): capacity(capacity), cqueue(std::queue<Sucket*>()) {}
+    std::queue<PairKey> cqueue;
+    ConnectionQueue(): capacity(0), cqueue(std::queue<PairKey>()) {}
+    ConnectionQueue(int capacity): capacity(capacity), cqueue(std::queue<PairKey>()) {}
   };
 
   // maps & set
