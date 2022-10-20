@@ -97,14 +97,24 @@ void TCPAssignment:: syscall_getpeername(UUID syscallUUID, int pid, int sockfd, 
 }
 
 void TCPAssignment:: syscall_getsockname( UUID syscallUUID, int pid, int sockfd, struct sockaddr *addr, socklen_t* addrlen) {
+  // DEBUG
+    std::cout << "SYSCALL_getsockname\n";
+  // end DEBUG
+  
   PairKey pairKey {sockfd, pid};
   if (pairKeyToSucket.find(pairKey) == pairKeyToSucket.end()){
+    // DEBUG
+      std::cout << "getsockname fail: cannot find sucket\n";
+    // end DEBUG
     this->returnSystemCall(syscallUUID, -1);
     return;
   }
 
   Sucket& sucket = pairKeyToSucket[pairKey];
   if(bindedAddress.find(sucket.localAddr) == bindedAddress.end() && subBindedAddress.find(sucket.localAddr) == subBindedAddress.end()) {
+    // DEBUG
+      std::cout << "getsockname fail: cannot find binded address\n";
+    // end DEBUG
     this->returnSystemCall(syscallUUID, -1);
     return;
   }
@@ -129,7 +139,7 @@ void TCPAssignment:: syscall_close(UUID syscallUUID, int pid, int sockfd){
     std::cout << "SYSCALL_CLOSE: closing sockfd=" << sockfd << ",pid=" << pid<<"\n";
   // end DEBUG
 
-  PairKey pairKey {sockfd, pid}; 
+  PairKey pairKey {sockfd, pid};
   if (pairKeyToSucket.find(pairKey) == pairKeyToSucket.end()){
     this->returnSystemCall(syscallUUID, -1);
     return; 
@@ -149,40 +159,13 @@ void TCPAssignment:: syscall_close(UUID syscallUUID, int pid, int sockfd){
 
   PairAddress pairAddress = PairAddress{sucket.localAddr, sucket.remoteAddr};
   sucket.state = TCP_FIN_WAIT_1;
-  _send_packet(sucket, FIN_FLAG);
+  _send_packet(sucket, FIN_FLAG | ACK_FLAG);
 
   // DEBUG
-    std::cout << "sended FIN packet, state = TCP_FIN_WAIT_1\n";
+    std::cout << "sended FIN_ACK packet, state = TCP_FIN_WAIT_1\n";
   // end DEBUG
 
   this->returnSystemCall(syscallUUID, 0);
-
-  // Sucket& sucket = pairKeyToSucket[pairKey];
-  // PairAddress pairAddress = PairAddress{sucket.localAddr, sucket.remoteAddr};
-  // TCP_STATE state = sucket.state;
-  // switch (state)
-  // {
-  //   case TCP_ESTABLISHED: // check here
-  //     _send_packet(sucket, FIN_FLAG | ACK_FLAG);
-  //     sucket.state = TCP_FIN_WAIT_1;
-  //     break;
-
-  //   case TCP_CLOSE_WAIT:
-  //     _send_packet(sucket, FIN_FLAG | ACK_FLAG);
-  //     sucket.state = TCP_LAST_ACK;
-  //     break;
-    
-  //   default:
-  //     if (bindedAddress.find(sucket.localAddr) != bindedAddress.end()){
-  //       bindedAddress.erase(sucket.localAddr);
-  //     }
-  //     pairKeyToSucket.erase(pairKey);
-  //     pairAddressToPairKey.erase(pairAddress);
-  //     break;
-  // }
-
-  // this->removeFileDescriptor(pid, sockfd);
-  // this->returnSystemCall(syscallUUID, 0);
 }
 
 void TCPAssignment::syscall_connect(UUID syscallUUID, int pid, int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
@@ -232,8 +215,8 @@ void TCPAssignment::syscall_connect(UUID syscallUUID, int pid, int sockfd, const
   PairAddress pairAddress = {sucket.localAddr, sucket.remoteAddr};
   handshaking[pairAddress] = pairKey;
 
-  _send_packet(sucket, SYN_FLAG);
   sucket.state = TCP_SYN_SENT;
+  _send_packet(sucket, SYN_FLAG);
 
   // bool timeout = false;
   // UUID timerId = TCPAssignment::addTimer(&timeout, 1000000000);
@@ -465,13 +448,14 @@ void TCPAssignment::systemCallback(UUID syscallUUID, int pid,
 
 void TCPAssignment::_handle_SYN(Address sourceAddr, Address destAddr, uint32_t seqNum) {
   // DEBUG
-  std::cout << "This is SYN FLAG\n";
+    std::cout << "This is SYN FLAG\n";
+  // end DEBUG
 
   Address listening_zero_addr = destAddr; listening_zero_addr.first = 0;
 
   if(bindedAddress.find(destAddr) == bindedAddress.end() && bindedAddress.find(listening_zero_addr) == bindedAddress.end()) {
     // DEBUG
-    std::cout << "handlesyn...no sucket binded to addr\n";
+      std::cout << "handlesyn...no sucket binded to addr\n";
     // end DEBUG
     return;
   }
@@ -515,20 +499,22 @@ void TCPAssignment::_handle_SYN(Address sourceAddr, Address destAddr, uint32_t s
 
 void TCPAssignment::_handle_SYN_ACK(Address sourceAddr, Address destAddr, uint32_t ackNum, uint32_t seqNum) {
   // DEBUG
-  std::cout << "This is SYN|ACK FLAG...";
-  std::cout << "receiving packet from ip=" << sourceAddr.first << ",port=" << sourceAddr.second << "\n";
+  std::cout << "This is SYN|ACK FLAG\n";
 
   PairAddress pairAddress = {destAddr, sourceAddr};
   if(handshaking.find(pairAddress) == handshaking.end()) {
     // DEBUG  
-    std::cout << "...fail: cannot find pair address in handshaking\n";
+      std::cout << "handle syn/ack fail: fail: cannot find pair address in handshaking\n";
+    // end DEBUG
+
     return;
   }
 
   Sucket& sucket = pairKeyToSucket[handshaking[pairAddress]];
   if(sucket.state != TCP_SYN_SENT || ackNum != sucket.seqNum + 1) {
     // DEBUG  
-    std::cout << "...fail: sucket state must be TCP_SYN_SENT or wrong ackNum\n";
+      std::cout << "handle syn/ack fail: sucket state must be TCP_SYN_SENT or wrong ackNum=" << (ackNum != sucket.seqNum + 1) << '\n';
+    // end DEBUG
     return;
   }
   sucket.state = TCP_ESTABLISHED;
@@ -540,7 +526,7 @@ void TCPAssignment::_handle_SYN_ACK(Address sourceAddr, Address destAddr, uint32
   handshaking.erase(pairAddress);
 
   // DEBUG  
-  std::cout << "...done: client connection established (" << sourceAddr.first << "," << sourceAddr.second << ") and (" << destAddr.first << "," << destAddr.second << ")\n";
+  std::cout << "handle syn/ack done: client connection established (" << sourceAddr.first << "," << sourceAddr.second << ") and (" << destAddr.first << "," << destAddr.second << ")\n";
   // end DEBUG
 
   return;
@@ -556,9 +542,20 @@ void TCPAssignment::_handle_ACK(Address sourceAddr, Address destAddr, uint32_t a
     PairKey pairKey = sucket.pairKey;
     if(sucket.seqNum + 1 != ackNum) 
       return;
-    sucket.seqNum += 1;
+    // sucket.seqNum += bytes; -- no data 
     sucket.ackNum = seqNum + 1;
+    if(sucket.state == TCP_FIN_WAIT_1) {
+      sucket.state = TCP_FIN_WAIT_2;
+    } else if(sucket.state == TCP_LAST_ACK) {
+      bindedAddress.erase(sucket.localAddr);
+      subBindedAddress.erase(sucket.localAddr);
+      pairAddressToPairKey.erase(pairAddress);
+      pairKeyToSucket.erase(pairKey);
 
+      // DEBUG
+        std::cout << "disconnected server socket: fd=" << pairKey.first << ",pid=" << pairKey.second << "\n";
+      //
+    }
   } else if(handshaking.find(pairAddress) != handshaking.end()) {
     Sucket* sucketPtr = &pairKeyToSucket[handshaking[pairAddress]];
     sucketPtr->state = TCP_ESTABLISHED;
@@ -576,55 +573,45 @@ void TCPAssignment::_handle_ACK(Address sourceAddr, Address destAddr, uint32_t a
   }
 }
 
-void TCPAssignment::_handle_FIN_ACK(Address sourceAddr, Address destAddr, uint32_t seqNum) {
-    
-    //   if(sucket.state == TCP_FIN_WAIT_1) {
-    //   sucket.state = TCP_FIN_WAIT_2;
-    //   sucket.ackNum = seqNum + 1;
-    // } else if(sucket.state == TCP_LAST_ACK) {
-    //   subBindedAddress.erase(sucket.localAddr);
-    //   pairAddressToPairKey.erase(pairAddress);
-    //   pairKeyToSucket.erase(pairKey);
-    // }
+// void TCPAssignment::_handle_FIN_ACK(Address sourceAddr, Address destAddr, uint32_t seqNum) {
+//   // DEBUG
+//     std::cout << "This is FIN_ACK FLAG...";
+//   // end DEBUG
 
-  // DEBUG
-    std::cout << "This is FIN_ACK FLAG...";
-  // end DEBUG
-
-  PairAddress pairAddress = {destAddr, sourceAddr};
-  if(pairAddressToPairKey.find(pairAddress) != pairAddressToPairKey.end()) {
-    Sucket& sucket = pairKeyToSucket[pairAddressToPairKey[pairAddress]];
-    PairKey pairKey = sucket.pairKey;
+//   PairAddress pairAddress = {destAddr, sourceAddr};
+//   if(pairAddressToPairKey.find(pairAddress) != pairAddressToPairKey.end()) {
+//     Sucket& sucket = pairKeyToSucket[pairAddressToPairKey[pairAddress]];
+//     PairKey pairKey = sucket.pairKey;
     
-    if(sucket.state == TCP_FIN_WAIT_1) {
-      sucket.state = TCP_FIN_WAIT_2;
-      sucket.ackNum = seqNum + 1;
-      // DEBUG
-        std::cout << "done: moved to fin_wait_2\n";
-      // end DEBUG
-    } else if (sucket.state == TCP_LAST_ACK) {
-      subBindedAddress.erase(sucket.localAddr);
-      pairAddressToPairKey.erase(pairAddress);
-      pairKeyToSucket.erase(pairKey);
-      // DEBUG
-        std::cout << "done: ended client socket\n";
-      // end DEBUG
-    } else {
-      // DEBUG
-        std::cout << "fail: undefined state..." << (sucket.state == TCP_ESTABLISHED) << "\n";
-      // end DEBUG
-    }
+//     if(sucket.state == TCP_FIN_WAIT_1) {
+//       sucket.state = TCP_FIN_WAIT_2;
+//       sucket.ackNum = seqNum + 1;
+//       // DEBUG
+//         std::cout << "done: moved to fin_wait_2\n";
+//       // end DEBUG
+//     } else if (sucket.state == TCP_LAST_ACK) {
+//       subBindedAddress.erase(sucket.localAddr);
+//       pairAddressToPairKey.erase(pairAddress);
+//       pairKeyToSucket.erase(pairKey);
+//       // DEBUG
+//         std::cout << "done: ended client socket\n";
+//       // end DEBUG
+//     } else {
+//       // DEBUG
+//         std::cout << "fail: undefined state..." << (sucket.state == TCP_ESTABLISHED) << "\n";
+//       // end DEBUG
+//     }
       
-  } else {
-    // DEBUG
-      std::cout << "fail: cannot find connection\n";
-    // end DEBUG
-  }
-}
+//   } else {
+//     // DEBUG
+//       std::cout << "fail: cannot find connection\n";
+//     // end DEBUG
+//   }
+// }
 
-void TCPAssignment::_handle_FIN(Address sourceAddr, Address destAddr, uint32_t seqNum) {
+void TCPAssignment::_handle_FIN_ACK(Address sourceAddr, Address destAddr, uint32_t seqNum) {
   // DEBUG
-    std::cout << "this is FIN flag...";
+    std::cout << "this is FIN | ACK flag...";
   // end DEBUG
 
   PairAddress pairAddress = {destAddr, sourceAddr};
@@ -638,9 +625,11 @@ void TCPAssignment::_handle_FIN(Address sourceAddr, Address destAddr, uint32_t s
   Sucket& sucket = pairKeyToSucket[pairAddressToPairKey[pairAddress]];
   if(sucket.state == TCP_FIN_WAIT_2) {
     bindedAddress.erase(sucket.localAddr);
+    subBindedAddress.erase(sucket.localAddr);
     pairAddressToPairKey.erase(pairAddress);
     PairKey pairKey = sucket.pairKey;
     pairKeyToSucket.erase(pairKey);
+    return;
   }
   else if(sucket.state != TCP_ESTABLISHED) {
     // DEBUG
@@ -649,12 +638,15 @@ void TCPAssignment::_handle_FIN(Address sourceAddr, Address destAddr, uint32_t s
     return;
   }
 
+  // server with state == TCP_ESTABLISHED
   sucket.ackNum = seqNum + 1;
-  sucket.state = TCP_CLOSE_WAIT;
+  sucket.state = TCP_CLOSE_WAIT;  
   _send_packet(sucket, ACK_FLAG);
 
-  sucket.state = TCP_LAST_ACK;
-  _send_packet(sucket, FIN_FLAG);
+  // DEBUG
+    std::cout << "done: closed connection on socket moved -> TCP_CLOSE_WAIT, fd=" << sucket.pairKey.first << ",pid=" << sucket.pairKey.second << "\n";
+  // end DEBUG
+
   return;
 }
 
@@ -695,53 +687,13 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
 
   // TODO: handle ackNum and seqNum in each flag
 
-  switch (flags)
-  {
-    case (FIN_FLAG):
-      _handle_FIN(sourceAddr, destAddr, seqNum);
-      break;
-
-    case (FIN_FLAG | ACK_FLAG):
-      _handle_FIN_ACK(sourceAddr, destAddr, seqNum);
-      // if(ackNum != sucket.seqNum + 1) { // wrong ack
-      //   return;
-      // }
-
-      // if (sucket.state == TCP_FIN_WAIT_1){
-       
-      //   sucket.state = TCP_CLOSING;
-      //   _send_packet(sucket, ACK_FLAG);        
-      // }
-      // else if (sucket.state == TCP_FIN_WAIT_2){
-      //   _send_packet(sucket, ACK_FLAG);
-      //   sucket.state = TCP_TIME_WAIT;
-      //   // TODO: Add a timer here
-      // }
-      // else if (sucket.state == TCP_ESTABLISHED){
-      //   _send_packet(sucket, ACK_FLAG);
-      //   sucket.state = TCP_CLOSE_WAIT;
-      // }
-      break;
-    
-    case (SYN_FLAG):
-      _handle_SYN(sourceAddr, destAddr, seqNum);
-      break; 
-
-    case (SYN_FLAG | ACK_FLAG):
-      _handle_SYN_ACK(sourceAddr, destAddr, ackNum, seqNum);
-      break;
-
-    case (ACK_FLAG):
-      _handle_ACK(sourceAddr, destAddr, ackNum, seqNum);
-      break;
-
-    default:
-      std::cout << "No FLAG seen: " << unsigned(flags) << "...checking for connection establish..."; 
-      
-      break;
+  if(flags == (FIN_FLAG | ACK_FLAG)) _handle_FIN_ACK(sourceAddr, destAddr, seqNum);
+  else if(flags == SYN_FLAG) _handle_SYN(sourceAddr, destAddr, seqNum);
+  else if(flags == (SYN_FLAG | ACK_FLAG)) _handle_SYN_ACK(sourceAddr, destAddr, ackNum, seqNum);
+  else if(flags == ACK_FLAG) _handle_ACK(sourceAddr, destAddr, ackNum, seqNum);
+  else {
+    std::cout << "No FLAG seen: " << unsigned(flags) << "...checking for connection establish...";
   }
-
-
 }
 
 void TCPAssignment::timerCallback(std::any payload) {
