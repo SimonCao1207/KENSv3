@@ -136,7 +136,7 @@ void TCPAssignment:: _send_packet(Sucket& sucket, uint8_t flag){
 void TCPAssignment:: syscall_close(UUID syscallUUID, int pid, int sockfd){
 
   // DEBUG
-    std::cout << "SYSCALL_CLOSE: closing sockfd=" << sockfd << ",pid=" << pid<<"\n" << std::flush;
+    // std::cout << "SYSCALL_CLOSE: closing sockfd=" << sockfd << ",pid=" << pid<<"\n" << std::flush;
   // end DEBUG
 
   PairKey pairKey {sockfd, pid};
@@ -164,7 +164,7 @@ void TCPAssignment:: syscall_close(UUID syscallUUID, int pid, int sockfd){
   }
 
   // DEBUG
-    std::cout << "sended FIN_ACK packet, state = TCP_FIN_WAIT_1\n" << std::flush;
+    // std::cout << "sended FIN_ACK packet, state = TCP_FIN_WAIT_1\n" << std::flush;
   // end DEBUG
 }
 
@@ -475,7 +475,7 @@ void TCPAssignment::_handle_SYN(Address sourceAddr, Address destAddr, uint32_t s
   else if (listener_sucket.state == TCP_LISTEN) {
     ConnectionQueue& connection_queue = pairKeyToConnectionQueue[listener_sucket.pairKey];
 
-    if(handshaking.size() + connection_queue.cqueue.size() + 1 > connection_queue.capacity) {
+    if(connection_queue.capacity == 0) {
       // DEBUG
       std::cout << "handlesyn...listening queue overloaded\n" << std::flush;
       return;
@@ -493,6 +493,7 @@ void TCPAssignment::_handle_SYN(Address sourceAddr, Address destAddr, uint32_t s
     _send_packet(sucket, SYN_FLAG | ACK_FLAG);
 
     handshaking[PairAddress{sucket.localAddr, sucket.remoteAddr}] = pairKey;
+    connection_queue.capacity --;
 
     // pairAddressToPairKey[PairAddress{sucket.localAddr, sucket.remoteAddr}] = pairKey;
 
@@ -594,6 +595,7 @@ void TCPAssignment::_handle_ACK(Address sourceAddr, Address destAddr, uint32_t a
     } else {
       ConnectionQueue& connection_queue = pairKeyToConnectionQueue[currSucket.parentPairKey];
       connection_queue.cqueue.push(currSucket.pairKey);
+      connection_queue.capacity ++;
       // DEBUG
         std::cout << "...Pushed new connection to connection_queue\n" << std::flush;
       // end DEBUG
