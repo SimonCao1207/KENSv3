@@ -112,20 +112,6 @@ protected:
     uint16_t port = ntohs(address.sin_port);
     return std::make_pair(ip, port);
   }
-  struct BufferRcv {
-    int bytesRcvd;
-    int bytesAck;
-    std::queue<uint8_t> bufferData;
-    BufferRcv() : bytesRcvd(0), bufferData(std::queue<uint8_t>()) {}
-  };
-
-  struct BufferSnd {
-    int bytesSnd;
-    int bytesAck;
-    int cwnd;
-    std::queue<uint8_t> bufferData;
-    BufferSnd(): bytesSnd(0), bytesAck(0), bufferData(std::queue<uint8_t>()) {}
-  };
 
   struct PendingAccept {
     bool isPending;
@@ -140,8 +126,6 @@ protected:
     Address remoteAddr;
     PairKey pairKey;
     PairKey parentPairKey;
-    BufferRcv bufferRcv;
-    BufferSnd bufferSnd;
     TCP_STATE state;
     UUID syscall_id;
     uint32_t seqNum;
