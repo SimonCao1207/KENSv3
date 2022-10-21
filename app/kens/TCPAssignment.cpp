@@ -133,39 +133,58 @@ void TCPAssignment:: _send_packet(Sucket& sucket, uint8_t flag){
   return;
 }
 
+void TCPAssignment::_syscall_close(PairKey pairKey) {
+  Sucket& sucket = pairKeyToSucket[pairKey];
+  if (sucket.state == TCP_ESTABLISHED){
+    _send_packet(sucket, FIN_FLAG | ACK_FLAG);
+    sucket.state = TCP_FIN_WAIT_1;
+
+    // DEBUG
+      std::cout << "sended FIN_ACK packet, state = TCP_FIN_WAIT_1\n" << std::flush;
+    // end DEBUG
+  }
+  else if (sucket.state == TCP_CLOSE_WAIT){
+    _send_packet(sucket, FIN_FLAG | ACK_FLAG);
+    sucket.state = TCP_LAST_ACK; 
+
+    // DEBUG
+      std::cout << "sended FIN_ACK packet, state = TCP_LAST_ACK\n" << std::flush;
+    // end DEBUG
+  }
+  else if(sucket.state == TCP_SYN_SENT) {
+    sucket.isPendingClose = true;
+    // DEBUG
+      std::cout << "in handshaking process...pending close\n" << std::flush;
+    // end DEBUG
+  } 
+  else {
+    bindedAddress.erase(sucket.localAddr);
+    subBindedAddress.erase(sucket.localAddr);
+    pairAddressToPairKey.erase(PairAddress{sucket.localAddr, sucket.remoteAddr});
+    pairKeyToSucket.erase(pairKey);
+    if (sucket.state == TCP_LISTEN)     
+      pairKeyToConnectionQueue.erase(pairKey);
+    this->removeFileDescriptor(pairKey.second, pairKey.first);  
+
+    // DEBUG
+      // std::cout << "removed sucket sockfd=\n" << std::flush;
+    // end DEBUG
+  }
+}
+
 void TCPAssignment:: syscall_close(UUID syscallUUID, int pid, int sockfd){
 
   // DEBUG
-    std::cout << "SYSCALL_CLOSE: closing sockfd=" << sockfd << ",pid=" << pid<<"\n" << std::flush;
+    // std::cout << "SYSCALL_CLOSE: closing sockfd=" << sockfd << ",pid=" << pid<<"\n" << std::flush;
   // end DEBUG
 
   PairKey pairKey {sockfd, pid};
   if (pairKeyToSucket.find(pairKey) == pairKeyToSucket.end()){
     this->returnSystemCall(syscallUUID, -1);
-    return; 
+    return;
   }
-  
-  Sucket& sucket = pairKeyToSucket[pairKey];
-  if (sucket.state == TCP_ESTABLISHED){
-    _send_packet(sucket, FIN_FLAG | ACK_FLAG);
-    sucket.state = TCP_FIN_WAIT_1; 
-  }
-  else if (sucket.state == TCP_CLOSE_WAIT){
-    _send_packet(sucket, FIN_FLAG | ACK_FLAG);
-    sucket.state = TCP_LAST_ACK; 
-  } else {
-    bindedAddress.erase(sucket.localAddr);
-    subBindedAddress.erase(sucket.localAddr);
-    pairKeyToSucket.erase(pairKey);
-    if (sucket.state == TCP_LISTEN)     
-      pairKeyToConnectionQueue.erase(pairKey);
-    this->removeFileDescriptor(pid, sockfd);  
-    this->returnSystemCall(syscallUUID, 0);
-  }
-
-  // DEBUG
-    std::cout << "sended FIN_ACK packet, state = TCP_FIN_WAIT_1\n" << std::flush;
-  // end DEBUG
+  _syscall_close(pairKey);
+  this->returnSystemCall(syscallUUID, 0);
 }
 
 void TCPAssignment::syscall_connect(UUID syscallUUID, int pid, int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
@@ -190,27 +209,30 @@ void TCPAssignment::syscall_connect(UUID syscallUUID, int pid, int sockfd, const
   // Assign remote address for Sucket
   sucket.remoteAddr =  addrInfoToAddr(AddressInfo(*addr, addrlen));
 
-  // START: Assign source address for Sucket
-  ipv4_t ipv4_dest_ip = NetworkUtil::UINT64ToArray<std::size_t(4)>(sucket.remoteAddr.first);
-  int NIC_port = getRoutingTable(ipv4_dest_ip);
-  std::optional<ipv4_t> ipv4_local_ip_opt = getIPAddr(NIC_port);
+  if(bindedAddress.find(sucket.localAddr) == bindedAddress.end()) {
+    // START: Assign source address for Sucket
+    ipv4_t ipv4_dest_ip = NetworkUtil::UINT64ToArray<std::size_t(4)>(sucket.remoteAddr.first);
+    int NIC_port = getRoutingTable(ipv4_dest_ip);
+    std::optional<ipv4_t> ipv4_local_ip_opt = getIPAddr(NIC_port);
 
-  if(ipv4_local_ip_opt.has_value() == false) {
-    this->returnSystemCall(syscallUUID, -1);
-    return;
-  } else {
-    uint32_t source_ip = ntohl(NetworkUtil::arrayToUINT64(ipv4_local_ip_opt.value()));
-    uint16_t source_port = ntohs(uint16_t(rand()) * uint16_t(rand()));
-    AddressInfo localAddrInfo = addrToAddrInfo(Address{source_ip, source_port});
+    if(ipv4_local_ip_opt.has_value() == false) {
+      this->returnSystemCall(syscallUUID, -1);
+      return;
+    } else {
+      uint32_t source_ip = ntohl(NetworkUtil::arrayToUINT64(ipv4_local_ip_opt.value()));
+      uint16_t source_port = ntohs(uint16_t(rand()) * uint16_t(rand()));
+      AddressInfo localAddrInfo = addrToAddrInfo(Address{source_ip, source_port});
 
-    // loop to generate port number 
-    // CHECK HERE: possibly loop forever
-    while(_syscall_bind(sockfd, pid, &localAddrInfo.first, localAddrInfo.second) != 0) {
-      source_port = ntohs(uint16_t(rand()) * uint16_t(rand()));
-      localAddrInfo = addrToAddrInfo(Address{source_ip, source_port});
+      // loop to generate port number 
+      // CHECK HERE: possibly loop forever
+      while(_syscall_bind(sockfd, pid, &localAddrInfo.first, localAddrInfo.second) != 0) {
+        source_port = ntohs(uint16_t(rand()) * uint16_t(rand()));
+        localAddrInfo = addrToAddrInfo(Address{source_ip, source_port});
+      }
+      sucket.localAddr = Address{source_ip, source_port};
     }
+    // END: assign source address
   }
-  // END: assign source address
 
   PairAddress pairAddress = {sucket.localAddr, sucket.remoteAddr};
   handshaking[pairAddress] = pairKey;
@@ -456,7 +478,7 @@ void TCPAssignment::_handle_SYN(Address sourceAddr, Address destAddr, uint32_t s
   // end DEBUG
 
   // check simultaneousConnect
-  PairAddress pairAddress = PairAddress{destAddr, sourceAddr};
+  PairAddress pairAddress = PairAddress{destAddr,sourceAddr};
   if(handshaking.find(pairAddress) != handshaking.end()) {
     // DEBUG
       std::cout << "Simultaneous connection...";
@@ -489,13 +511,11 @@ void TCPAssignment::_handle_SYN(Address sourceAddr, Address destAddr, uint32_t s
 
   Sucket& listener_sucket = (bindedAddress.find(destAddr) == bindedAddress.end()) ? pairKeyToSucket[bindedAddress[listening_zero_addr]] : pairKeyToSucket[bindedAddress[destAddr]];
 
+  // DEBUG
+    std::cout << "state:" << (handshaking.find(pairAddress) != handshaking.end()) << '\n';
+  // end DEBUG
 
-  if(listener_sucket.state == TCP_SYN_SENT) {
-    std::cout << "handlesyn...not listening state but in SYN_SENT state\n" << std::flush;
-    return;
-  }
-
-  else if (listener_sucket.state == TCP_LISTEN) {
+  if (listener_sucket.state == TCP_LISTEN) {
     ConnectionQueue& connection_queue = pairKeyToConnectionQueue[listener_sucket.pairKey];
 
     if(connection_queue.capacity == 0) {
@@ -554,6 +574,16 @@ void TCPAssignment::_handle_SYN_ACK(Address sourceAddr, Address destAddr, uint32
     // DEBUG  
       std::cout << "connected\n" << std::flush;
     // end DEBUG
+
+    if(sucket.isPendingClose) {
+      sucket.isPendingClose = false;
+      _syscall_close(sucket.pairKey);
+
+      // DEBUG
+        std::cout << "handle syn/ack continue: isPendingClose = true => closing sucket now\n";
+      // end DEBUG
+    }
+
     return;
   }
   else if(sucket.state != TCP_SYN_SENT || ackNum != sucket.seqNum + 1) {
@@ -573,6 +603,15 @@ void TCPAssignment::_handle_SYN_ACK(Address sourceAddr, Address destAddr, uint32
   // DEBUG  
   std::cout << "handle syn/ack done: client connection established (" << sourceAddr.first << "," << sourceAddr.second << ") and (" << destAddr.first << "," << destAddr.second << ")\n" << std::flush;
   // end DEBUG
+
+  if(sucket.isPendingClose) {
+    sucket.isPendingClose = false;
+    _syscall_close(sucket.pairKey);
+
+    // DEBUG
+      std::cout << "handle syn/ack continue: isPendingClose = true => closing sucket now\n";
+    // end DEBUG
+  }
 
   return;
 }
@@ -610,6 +649,7 @@ void TCPAssignment::_handle_ACK(Address sourceAddr, Address destAddr, uint32_t a
     currSucket.state = TCP_ESTABLISHED;
     handshaking.erase(pairAddress);
     pairAddressToPairKey[pairAddress] = currSucket.pairKey;
+    ConnectionQueue& connection_queue = pairKeyToConnectionQueue[currSucket.parentPairKey];
 
     // DEBUG
     std::cout << "...done: connection ready to accept from (ip=" << sourceAddr.first << ",port=" << sourceAddr.second << ") to (ip=" << destAddr.first << ",port=" << destAddr.second;
@@ -630,13 +670,12 @@ void TCPAssignment::_handle_ACK(Address sourceAddr, Address destAddr, uint32_t a
         std::cout << "...Pushed new connection for pending accept syscallUUID=" << syscallUUID << "\n" << std::flush;
       // end DEBUG
     } else {
-      ConnectionQueue& connection_queue = pairKeyToConnectionQueue[currSucket.parentPairKey];
       connection_queue.cqueue.push(currSucket.pairKey);
-      connection_queue.capacity ++;
       // DEBUG
         std::cout << "...Pushed new connection to connection_queue\n" << std::flush;
       // end DEBUG
     }
+    connection_queue.capacity ++;
 
   } else {
     // DEBUG
