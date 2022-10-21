@@ -127,7 +127,6 @@ protected:
     PairKey pairKey;
     PairKey parentPairKey;
     TCP_STATE state;
-    UUID syscall_id;
     uint32_t seqNum;
     uint32_t ackNum;
     PendingAccept pendingAccept;
