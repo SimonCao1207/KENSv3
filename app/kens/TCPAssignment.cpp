@@ -766,10 +766,10 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
     // std::cout << "packet arrived from (ip=" << sourceAddr.first << ",port=" << sourceAddr.second << ") to (ip=" << dest_ip << ",port=" << dest_port << ") flags=" << unsigned(flags) << "\n" << std::flush;
   // end DEBUG
 
-  if(flags == (FIN_FLAG | ACK_FLAG)) _handle_FIN_ACK(sourceAddr, destAddr, seqNum);
-  else if(flags == SYN_FLAG) _handle_SYN(sourceAddr, destAddr, seqNum);
+  if(flags == SYN_FLAG) _handle_SYN(sourceAddr, destAddr, seqNum);
   else if(flags == (SYN_FLAG | ACK_FLAG)) _handle_SYN_ACK(sourceAddr, destAddr, ackNum, seqNum);
   else if(flags == ACK_FLAG) _handle_ACK(sourceAddr, destAddr, ackNum, seqNum);
+  else if(flags == (FIN_FLAG | ACK_FLAG)) _handle_FIN_ACK(sourceAddr, destAddr, seqNum);
   else {
     // std::cout << "packet handle fail: No FLAG seen: " << unsigned(flags) << "...checking for connection establish..." << std::flush;
   }
