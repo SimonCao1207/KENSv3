@@ -355,12 +355,12 @@ void TCPAssignment::syscall_accept(UUID syscallUUID, int pid, int sockfd, struct
   return;
 }
 
-Packet TCPAssignment::create_packet(Sucket& sucket, uint8_t flags) {
-  // packet data section = 0, currently not support data
+Packet TCPAssignment::create_packet(Sucket& sucket, uint8_t flags, int bytes) {
+  // packet data section = bytes
   // DEBUG
   // std::cerr << "Creating packet from ip=" << sucket.localAddr.first << ",port=" << sucket.localAddr.second << " to ip=" << sucket.remoteAddr.first << ",port=" << sucket.remoteAddr.second << " with flags=" << unsigned(flags) << "..." << std::flush;
 
-  size_t packet_size = 54;
+  size_t packet_size = 54 + bytes;
   Packet packet = Packet(packet_size);
 
   // uint8_t version_header_length = (4 << 4) + 20;
@@ -379,7 +379,8 @@ Packet TCPAssignment::create_packet(Sucket& sucket, uint8_t flags) {
   packet.writeData(SOURCE_PORT_OFFSET, &source_port, SOURCE_PORT_LENGTH);
   packet.writeData(DEST_PORT_OFFSET, &dest_port, DEST_PORT_LENGTH);
 
-  uint32_t seq_num = htonl(sucket.seqNum);
+  uint32_t numByte = sucket.sendBuffer.acked_bytes + sucket.sendBuffer.not_sent; // acked bytes + sent but unacked bytes
+  uint32_t seq_num = htonl(sucket.seqNum + numByte);
   packet.writeData(SEQ_NUM_OFFSET, &seq_num, SEQ_NUM_LENGTH);
 
   uint32_t ack_num = htonl(sucket.ackNum);
@@ -387,19 +388,31 @@ Packet TCPAssignment::create_packet(Sucket& sucket, uint8_t flags) {
 
   packet.writeData(FLAGS_OFFSET, &flags, FLAGS_LENGTH);
   
-  uint16_t rwnd = htons(1500);
+  uint16_t rwnd = htons(sucket.receiveBuffer.rwnd);
   packet.writeData(RWND_OFFSET, &rwnd, RWND_LENGTH);
 
-  uint16_t zero_checksum = 0;
-  packet.writeData(CHECKSUM_OFFSET, &zero_checksum, CHECKSUM_LENGTH);
-  size_t length = 20;
+  // uint16_t zero_checksum = 0;
+  // packet.writeData(CHECKSUM_OFFSET, &zero_checksum, CHECKSUM_LENGTH);
+  
+  // Data
+  if (bytes){
+    std::cout << "Create Packet contains data, bytes = " << bytes << "\n";
+    int notSentPos = sucket.sendBuffer.not_sent;
+    // std::cout << "notSentPos = " << notSentPos << "\n";
+    for (int i=0; i<bytes; i++){
+      
+      packet.writeData(54+i, &sucket.sendBuffer.buffer[notSentPos + i] ,1);
+    }
+  
+  }
+  
+  size_t length = 20 + bytes;
   uint8_t* tcp_seg = (uint8_t*)malloc(length);
   packet.readData(SOURCE_PORT_OFFSET, tcp_seg, length); // tcp_seg = start index tcp_seg in mem
   uint16_t checksum = htons(~NetworkUtil::tcp_sum(source_ip, dest_ip, tcp_seg, length));
 
   packet.writeData(CHECKSUM_OFFSET, &checksum, CHECKSUM_LENGTH);
   
-  // skip data
 
   // DEBUG
   // std::cout << "created packet...now sending\n" << std::flush;
@@ -407,6 +420,87 @@ Packet TCPAssignment::create_packet(Sucket& sucket, uint8_t flags) {
 
   return packet;
 }
+
+void TCPAssignment::syscall_read(UUID syscallUUID, int pid, int sockfd, void * buf, size_t count){
+  
+  PairKey pairKey = {sockfd, pid};
+  if(pairKeyToSucket.find(pairKey) == pairKeyToSucket.end()) {
+    this->returnSystemCall(syscallUUID, -1);
+    return;
+  }
+
+  Sucket& sucket = pairKeyToSucket[pairKey];
+  
+  // Initialize
+  if (sucket.receiveBuffer.buffer.empty()){
+    sucket.receiveBuffer.containData = true;
+    sucket.receiveBuffer.count = count;
+    sucket.receiveBuffer.uuid = syscallUUID;
+    sucket.receiveBuffer.application_buffer = buf;
+  }
+  
+  // If receive buffer contains data --> the data is copied to the application’s buffer and the call returns immediately.
+  if (sucket.receiveBuffer.containData){
+    int readBytes = std::min(sucket.receiveBuffer.count, (int) sucket.receiveBuffer.buffer.size());
+    for(int i=0; i<readBytes; i++){
+      memcpy(sucket.receiveBuffer.application_buffer + i, &sucket.receiveBuffer.buffer[0], 1);
+      sucket.receiveBuffer.buffer.pop_front();
+    }
+    sucket.receiveBuffer.rwnd += readBytes;
+    this->returnSystemCall(sucket.receiveBuffer.uuid, readBytes);
+}
+}
+
+
+void TCPAssignment::syscall_write(UUID syscallUUID, int pid, int sockfd, void * buf, size_t count){
+  // write in sockfd what data in buf
+  // std::cout << "Writing on sockfd = " << sockfd << " with count =" << count << "\n";
+
+  PairKey pairKey = {sockfd, pid};
+  if(pairKeyToSucket.find(pairKey) == pairKeyToSucket.end()) {
+    this->returnSystemCall(syscallUUID, -1);
+    return;
+  }
+  Sucket& sucket = pairKeyToSucket[pairKey];
+
+  // data is copied to the send buffer
+  int writtenBytes = 0;
+  uint8_t *v = (uint8_t *) buf;
+  for (int i=0; i < count; i++){
+    sucket.sendBuffer.buffer.push_back(*v);
+    v++;
+    writtenBytes ++;
+  }
+
+  std::cout << "Writing on sockfd = " << sockfd << " with buffer size = " << sucket.sendBuffer.buffer.size() << " and writtenBytes = " << writtenBytes << "\n";
+
+  sendChunkData(sucket);
+  this->returnSystemCall(syscallUUID, writtenBytes);
+}
+
+
+void TCPAssignment::sendChunkData(struct Sucket &sucket){
+  if (sucket.sendBuffer.buffer.empty()) 
+    std::cout << "Send buffer is empty" << "\n";
+  else 
+    std::cout << "Send buffer not empty and buffer size = " << (int) sucket.sendBuffer.buffer.size() << "\n";
+    
+  int bytes_to_send = std::min((int) sucket.sendBuffer.buffer.size() - sucket.sendBuffer.not_sent, sucket.sendBuffer.can_receive);
+  std::cout << "Send chunk data size = " << (unsigned int) bytes_to_send << "\n";
+
+  // Make the packet with ACK flag and send to network layer a chunk of data at a time.
+  while (bytes_to_send > 0){
+    int chunkLength = std::min(512, bytes_to_send);
+    std::cout << "sending ACK for chunk of data length = " << chunkLength << "\n";
+    bytes_to_send -= chunkLength;
+    sucket.sendBuffer.not_sent += chunkLength;
+    Packet packet = create_packet(sucket, ACK_FLAG, chunkLength);
+    sendPacket(std::string("IPv4"), packet);
+  }
+
+  sucket.sendBuffer.can_receive -= bytes_to_send;
+} 
+
 
 void TCPAssignment::systemCallback(UUID syscallUUID, int pid,
                                    const SystemCallParameter &param) {
@@ -424,14 +518,14 @@ void TCPAssignment::systemCallback(UUID syscallUUID, int pid,
     this->syscall_close(syscallUUID, pid, std::get<int>(param.params[0]));
     break;
   case READ:
-    // this->syscall_read(syscallUUID, pid, std::get<int>(param.params[0]),
-    //                    std::get<void *>(param.params[1]),
-    //                    std::get<int>(param.params[2]));
+    this->syscall_read(syscallUUID, pid, std::get<int>(param.params[0]),
+                       std::get<void *>(param.params[1]),
+                       std::get<int>(param.params[2]));
     break;
   case WRITE:
-    // this->syscall_write(syscallUUID, pid, std::get<int>(param.params[0]),
-    //                     std::get<void *>(param.params[1]),
-    //                     std::get<int>(param.params[2]));
+    this->syscall_write(syscallUUID, pid, std::get<int>(param.params[0]),
+                        std::get<void *>(param.params[1]),
+                        std::get<int>(param.params[2]));
     break;
   case CONNECT:
     this->syscall_connect(
@@ -616,7 +710,21 @@ void TCPAssignment::_handle_SYN_ACK(Address sourceAddr, Address destAddr, uint32
   return;
 }
 
-void TCPAssignment::_handle_ACK(Address sourceAddr, Address destAddr, uint32_t ackNum, uint32_t seqNum) {
+
+// void TCPAssignment:: pop_front(std::vector<uint8_t>& vec){
+//     if (vec.empty()) {
+//       std::cout << "The buffer is empty" << "\n";
+//       return;
+//     }
+//     else {
+//       std::cout << "vec size " << vec.size() << "\n";
+//     }
+//     vec.front() = std::move(vec.back());
+//     vec.pop_back();
+//   }
+
+
+void TCPAssignment::_handle_ACK(Address sourceAddr, Address destAddr, uint32_t ackNum, uint32_t seqNum, int rwnd) {
   // DEBUG
   // std::cout << "This is ACK FLAG\n" << std::flush;
   
@@ -624,9 +732,33 @@ void TCPAssignment::_handle_ACK(Address sourceAddr, Address destAddr, uint32_t a
   if(pairAddressToPairKey.find(pairAddress) != pairAddressToPairKey.end()) {
     Sucket& sucket = pairKeyToSucket[pairAddressToPairKey[pairAddress]];
     PairKey pairKey = sucket.pairKey;
+    
+    
+    if (sucket.state == TCP_ESTABLISHED){
+      std::cout << "receive ACK, sender buffer size =" << (int)sucket.sendBuffer.buffer.size() << "\n";
+
+      // Free the send buffer space allocated for acked data
+      int bytes_to_ack = ackNum - sucket.seqNum - sucket.sendBuffer.acked_bytes;
+      for (int i=0; i<bytes_to_ack; i++){
+        sucket.sendBuffer.buffer.pop_front();
+      }
+
+      // move the sender window (the number of in-flight bytes should be decreased)
+      sucket.sendBuffer.acked_bytes += bytes_to_ack;
+      sucket.sendBuffer.not_sent -= bytes_to_ack;
+
+      // adjust the sender window size (from advertised receive buffer size)
+      sucket.sendBuffer.can_receive = rwnd;
+
+      // send data if there is waiting data in the send buffer and if the data is sendable
+      sendChunkData(sucket);
+      return;
+    }
+
+      
     if(sucket.seqNum + 1 != ackNum) 
       return;
-    // sucket.seqNum += bytes; -- no data 
+ 
     sucket.ackNum = seqNum + 1;
     if(sucket.state == TCP_FIN_WAIT_1) {
       sucket.state = TCP_FIN_WAIT_2;
@@ -723,6 +855,10 @@ void TCPAssignment::_handle_FIN_ACK(Address sourceAddr, Address destAddr, uint32
   sucket.ackNum = seqNum + 1;
   sucket.state = TCP_CLOSE_WAIT;  
   _send_packet(sucket, ACK_FLAG);
+  
+  if (sucket.receiveBuffer.containData){
+    this->returnSystemCall(sucket.receiveBuffer.uuid, -1);
+  }
 
   // DEBUG
     // std::cout << "done: closed connection on socket moved -> TCP_CLOSE_WAIT, fd=" << sucket.pairKey.first << ",pid=" << sucket.pairKey.second << "\n" << std::flush;
@@ -740,9 +876,10 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
   uint32_t ackNum;
   uint32_t source_ip, dest_ip;
   uint16_t source_port, dest_port;
+  uint16_t payload;
+  uint16_t rwnd = 0;
 
-  Packet packetClone = packet.clone(); 
-  
+
   packet.readData(FLAGS_OFFSET, &flags, FLAGS_LENGTH);
   packet.readData(SEQ_NUM_OFFSET, &seqNum, SEQ_NUM_LENGTH);
   packet.readData(ACK_NUM_OFFSET, &ackNum, ACK_NUM_LENGTH);
@@ -750,7 +887,45 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
   packet.readData(SOURCE_PORT_OFFSET, &source_port, SOURCE_PORT_LENGTH);
   packet.readData(DEST_IP_OFFSET, &dest_ip, DEST_IP_LENGTH);
   packet.readData(DEST_PORT_OFFSET, &dest_port, DEST_PORT_LENGTH);
+  packet.readData(RWND_OFFSET, &rwnd, RWND_LENGTH);
+  
+  // Packet packetClone = packet.clone();
+  
+  // std::cout << "RECEIVE Packet size " << packet.getSize() << " , flag = " << (unsigned int) flags << "\n";
+  
+  if (packet.getSize() > 54){
+    std::cout << "RECEIVE packet contains payload size " << packet.getSize() - 54 << "\n";
+    PairAddress pairAddress {{source_ip, source_port} , {dest_ip,dest_port}};
+    PairKey pairKey = pairAddressToPairKey[pairAddress];
+    Sucket sucket = pairKeyToSucket[pairKey];
 
+    // Copy the payload to the corresponding TCP socket’s receive buffer
+    int sizeData = packet.getSize() - 54;
+    for (int i=0; i<sizeData; i++){
+      packet.readData(54+i, &payload, 1);
+      sucket.receiveBuffer.buffer.push_back(payload);
+    }
+
+    sucket.ackNum = sucket.seqNum + sizeData;
+    sucket.receiveBuffer.rwnd = MSS - (int) sucket.receiveBuffer.buffer.size();
+    
+    // If receive buffer contains data --> the data is copied to the application’s buffer and the call returns immediately.
+    if (sucket.receiveBuffer.containData){
+      int readBytes = std::min(sucket.receiveBuffer.count, (int) sucket.receiveBuffer.buffer.size());
+      for(int i=0; i<readBytes; i++){
+        memcpy(sucket.receiveBuffer.application_buffer + i, &sucket.receiveBuffer.buffer[0], 1);
+        sucket.receiveBuffer.buffer.pop_front();
+      }
+      sucket.receiveBuffer.rwnd += readBytes;
+      returnSystemCall(sucket.receiveBuffer.uuid, readBytes);
+    }
+
+    //Acknowledge received packet :  Send ACK
+    Packet new_packet = create_packet(sucket, ACK_FLAG);
+    sendPacket(std::string("IPv4"), new_packet);
+    return;
+  }
+  
   seqNum = ntohl(seqNum);
   ackNum = ntohl(ackNum);
   source_ip = ntohl(source_ip);
@@ -768,7 +943,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
 
   if(flags == SYN_FLAG) _handle_SYN(sourceAddr, destAddr, seqNum);
   else if(flags == (SYN_FLAG | ACK_FLAG)) _handle_SYN_ACK(sourceAddr, destAddr, ackNum, seqNum);
-  else if(flags == ACK_FLAG) _handle_ACK(sourceAddr, destAddr, ackNum, seqNum);
+  else if(flags == ACK_FLAG) _handle_ACK(sourceAddr, destAddr, ackNum, seqNum, rwnd);
   else if(flags == (FIN_FLAG | ACK_FLAG)) _handle_FIN_ACK(sourceAddr, destAddr, seqNum);
   else {
     // std::cout << "packet handle fail: No FLAG seen: " << unsigned(flags) << "...checking for connection establish..." << std::flush;

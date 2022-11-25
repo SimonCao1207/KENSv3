@@ -72,9 +72,8 @@ protected:
   # define ACK_FLAG	0x10
   # define URG_FLAG	0x20
 
-  // constants
+  #define MSS 1500 // Maximum Segment Size
 
-  
   // typedef
   typedef std::pair<int, int> PairKey; // (sockfd, id) - sucketkey
   typedef std::pair<uint32_t, uint16_t> Address; // (ip, port)
@@ -121,6 +120,23 @@ protected:
     PendingAccept(): isPending(false) {}
   };
 
+  struct SendBuffer { 
+    int acked_bytes;
+    int not_sent; 
+    int can_receive; // for flow control
+    std::deque<uint8_t> buffer;
+    SendBuffer() : acked_bytes(0), not_sent(0), can_receive(MSS) {}
+  };
+
+  struct ReceiveBuffer{
+    UUID uuid;
+    int rwnd;
+    bool containData;
+    int count;
+    void * application_buffer;
+    std::deque<uint8_t> buffer;
+    ReceiveBuffer() : rwnd(MSS), containData(false), count(0) {}
+  };
   struct Sucket {
     Address localAddr;
     Address remoteAddr;
@@ -130,6 +146,8 @@ protected:
     uint32_t seqNum;
     uint32_t ackNum;
     PendingAccept pendingAccept;
+    SendBuffer sendBuffer;
+    ReceiveBuffer receiveBuffer;
     bool isPendingClose;
     Sucket() : state(TCP_CLOSED), isPendingClose(false) {}
     Sucket(PairKey pairKey, TCP_STATE state) : pairKey(pairKey), state(state), isPendingClose(false) {
@@ -164,18 +182,22 @@ protected:
   virtual void syscall_bind(UUID syscallUUID, int pid, int sockfd, struct sockaddr *addr, socklen_t addrlen) final;
   virtual void syscall_getsockname(UUID syscallUUID, int pid, int sockfd, struct sockaddr *addr, socklen_t* addrlen) final;
   virtual void syscall_connect(UUID syscallUUID, int pid, int sockfd, const struct sockaddr *addr, socklen_t addrlen) final;
-  virtual Packet create_packet(struct Sucket&, uint8_t) final;
+  // virtual Packet create_packet(struct Sucket&, uint8_t) final;
+  virtual Packet create_packet(struct Sucket&, uint8_t, int bytes=0) final;
   virtual void syscall_close(UUID syscallUUID, int pid, int sockfd) final;
   virtual void _send_packet(Sucket& sucket, uint8_t type) final;
   virtual void syscall_listen(UUID syscallUUID, int pid, int sockfd, int backlog) final;
   virtual void syscall_accept(UUID syscallUUID, int pid, int sockfd, struct sockaddr* addr, socklen_t* addrlen) final;
   virtual int _syscall_getpeername(int sockfd, int pid, struct sockaddr * addr, socklen_t * addrlen) final;
   virtual void syscall_getpeername(UUID syscallUUID, int pid, int sockfd, struct sockaddr * addr, socklen_t * addrlen) final;
+  virtual void syscall_read(UUID syscallUUID, int pid, int sockfd, void * buf, size_t count) final;
+  virtual void syscall_write(UUID syscallUUID, int pid, int sockfd, void * buf, size_t count) final;
   virtual void _handle_SYN(Address sourceAddr, Address destAddr, uint32_t ackNum) final;
   virtual void _handle_SYN_ACK(Address sourceAddr, Address destAddr, uint32_t ackNum, uint32_t seqNum) final;
-  virtual void _handle_ACK(Address sourceAddr, Address destAddr, uint32_t ackNum, uint32_t seqNum) final;
+  virtual void _handle_ACK(Address sourceAddr, Address destAddr, uint32_t ackNum, uint32_t seqNum, int rwnd) final;
   virtual void _handle_FIN_ACK(Address sourceAddr, Address destAddr, uint32_t seqNum) final;
   virtual void _syscall_close(PairKey pairKey) final;
+  virtual void sendChunkData(struct Sucket &sucket) final;
 }; 
 
 class TCPAssignmentProvider {
