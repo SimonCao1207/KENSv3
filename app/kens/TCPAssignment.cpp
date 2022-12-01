@@ -30,11 +30,12 @@ void TCPAssignment::finalize() {}
 
 void TCPAssignment::_delete_sucket(Sucket& sucket) {
   // DEBUG
-    std::cout << "Deleting sucket\n";
+    // std::cout << "Deleting sucket\n";
   // end DEBUG
-
+  
   PairKey pairKey = sucket.pairKey;
-
+  if(sucket.isPendingCloseWait == false) // active closing
+    this->removeFileDescriptor(sucket.pairKey.second, sucket.pairKey.first);
   this->cancelTimer(sucket.timerKey);
   bindedAddress.erase(sucket.localAddr);
   subBindedAddress.erase(sucket.localAddr);
@@ -110,7 +111,7 @@ int TCPAssignment::_syscall_getpeername(int sockfd, int pid, struct sockaddr * a
 
 
 void TCPAssignment:: syscall_getpeername(UUID syscallUUID, int pid, int sockfd, struct sockaddr * addr, socklen_t * addrlen){
-  return this->returnSystemCall(syscallUUID, _syscall_getpeername(sockfd, pid, addr, addrlen));
+  this->returnSystemCall(syscallUUID, _syscall_getpeername(sockfd, pid, addr, addrlen));
 }
 
 void TCPAssignment:: syscall_getsockname( UUID syscallUUID, int pid, int sockfd, struct sockaddr *addr, socklen_t* addrlen) {
@@ -215,16 +216,15 @@ void TCPAssignment::_syscall_close(PairKey pairKey) {
 }
 
 void TCPAssignment:: syscall_close(UUID syscallUUID, int pid, int sockfd){
-
   // DEBUG
     std::cout << "SYSCALL_CLOSE: closing sockfd=" << sockfd << ",pid=" << pid<<"\n" << std::flush;
   // end DEBUG
-
   PairKey pairKey {sockfd, pid};
   if (pairKeyToSucket.find(pairKey) == pairKeyToSucket.end()){
     this->returnSystemCall(syscallUUID, -1);
     return;
   }
+
   _syscall_close(pairKey);
   this->removeFileDescriptor(pairKey.second, pairKey.first);
   this->returnSystemCall(syscallUUID, 0);
@@ -569,7 +569,7 @@ Packet TCPAssignment::create_packet(Sucket& sucket, uint8_t flags, int dataLengt
   
   uint16_t rwnd = htons(MBS - sucket.receiveBuffer.data.size());
   // DEBUG
-    std::cout << "CHECK WINDOWSIZE => " << MBS - sucket.receiveBuffer.data.size() << '\n';
+    // std::cout << "CHECK WINDOWSIZE => " << MBS - sucket.receiveBuffer.data.size() << '\n';
   // end DEBUG
   packet.writeData(RWND_OFFSET, &rwnd, RWND_LENGTH);
 
@@ -1091,7 +1091,7 @@ void TCPAssignment::_handle_FIN_ACK(Address sourceAddr, Address destAddr, uint32
 
   // handle auto close-wait
   sucket.isPendingCloseWait = true;
-  this->removeFileDescriptor(sucket.pairKey.second, sucket.pairKey.first);
+  // this->removeFileDescriptor(sucket.pairKey.second, sucket.pairKey.first);
   // check to handle dropped packet here
 
   // DEBUG
