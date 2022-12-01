@@ -74,7 +74,7 @@ protected:
   #define URG_FLAG	0x20
   #define MSS 1460 // max segment size
   #define MBS 51200// max buffer size
-  #define TIME_OUT 100000000
+  #define TIME_OUT 5000000
 
   // constants
 
@@ -142,7 +142,8 @@ protected:
     UUID syscallUUID;
     int count;
     void* buf;
-    std::deque<uint8_t> data; 
+    std::deque<uint8_t> data;
+    std::deque<Packet> lastAckPacket;
     ReceiveBuffer(): isPending(false), data(std::deque<uint8_t>()) {}
   };
 
@@ -165,24 +166,32 @@ protected:
     bool isPendingClose;
     bool isPendingSimulClose;
     bool isLastTimer;
+    bool isPendingCloseWait;
     UUID connect_syscallUUID;
     UUID timerKey;
     uint8_t lastActionFlag;
+    int finWait2;
     Sucket() : state(TCP_CLOSED), isPendingClose(false) {
       seqNum = uint32_t(rand()) + uint32_t(rand()) * uint32_t(rand());
       isPendingSimulClose = false;
       isLastTimer = false;
+      isPendingCloseWait = false;
+      finWait2 = 0;
     }
     Sucket(PairKey pairKey, TCP_STATE state) : pairKey(pairKey), state(state), isPendingClose(false) {
       // Initialize random seq_num here
       seqNum = uint32_t(rand()) + uint32_t(rand()) * uint32_t(rand());
       isPendingSimulClose = false;
       isLastTimer = false;
+      isPendingCloseWait = false;
+      finWait2 = 0;
     }
     Sucket(PairKey pairKey, Address localAddr, Address remoteAddr, TCP_STATE state): pairKey(pairKey), localAddr(localAddr), remoteAddr(localAddr), state(state), isPendingClose(false) {
       seqNum = uint32_t(rand()) + uint32_t(rand()) * uint32_t(rand());
       isPendingSimulClose = false;
       isLastTimer = false;
+      isPendingCloseWait = false;
+      finWait2 = 0;
     }
   };
 
