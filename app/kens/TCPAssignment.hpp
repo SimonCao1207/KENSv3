@@ -167,16 +167,20 @@ protected:
     bool isPendingSimulClose;
     bool isLastTimer;
     bool isPendingCloseWait;
+    bool isAccepted;
     UUID connect_syscallUUID;
     UUID timerKey;
     uint8_t lastActionFlag;
     int finWait2;
+    int closeWait;
     Sucket() : state(TCP_CLOSED), isPendingClose(false) {
       seqNum = uint32_t(rand()) + uint32_t(rand()) * uint32_t(rand());
       isPendingSimulClose = false;
       isLastTimer = false;
       isPendingCloseWait = false;
       finWait2 = 0;
+      closeWait = 0;
+      isAccepted = false;
     }
     Sucket(PairKey pairKey, TCP_STATE state) : pairKey(pairKey), state(state), isPendingClose(false) {
       // Initialize random seq_num here
@@ -185,6 +189,8 @@ protected:
       isLastTimer = false;
       isPendingCloseWait = false;
       finWait2 = 0;
+      closeWait = 0;
+      isAccepted = false;
     }
     Sucket(PairKey pairKey, Address localAddr, Address remoteAddr, TCP_STATE state): pairKey(pairKey), localAddr(localAddr), remoteAddr(localAddr), state(state), isPendingClose(false) {
       seqNum = uint32_t(rand()) + uint32_t(rand()) * uint32_t(rand());
@@ -192,6 +198,8 @@ protected:
       isLastTimer = false;
       isPendingCloseWait = false;
       finWait2 = 0;
+      closeWait = 0;
+      isAccepted = false;
     }
   };
 

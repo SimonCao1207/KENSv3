@@ -36,6 +36,19 @@ void TCPAssignment::_delete_sucket(Sucket& sucket) {
   PairKey pairKey = sucket.pairKey;
   if(sucket.isPendingCloseWait == false) // active closing
     this->removeFileDescriptor(sucket.pairKey.second, sucket.pairKey.first);
+
+  // if(pairKeyToConnectionQueue.find(sucket.parentPairKey) != pairKeyToConnectionQueue.end()) {
+  //   ConnectionQueue& connectionQueue = pairKeyToConnectionQueue[sucket.parentPairKey];
+  //   std::queue<PairKey> temp;
+  //   while(!connectionQueue.cqueue.empty()) {
+  //     PairKey curr = connectionQueue.cqueue.front();
+  //     connectionQueue.cqueue.pop();
+  //     if(curr != sucket.pairKey)
+  //       temp.push(curr);
+  //   }
+  //   connectionQueue.cqueue = temp;
+  // }
+
   this->cancelTimer(sucket.timerKey);
   bindedAddress.erase(sucket.localAddr);
   subBindedAddress.erase(sucket.localAddr);
@@ -400,6 +413,12 @@ void TCPAssignment::syscall_accept(UUID syscallUUID, int pid, int sockfd, struct
   // end DEBUG
 
   this->returnSystemCall(syscallUUID, sucketPtr.pairKey.first);
+  
+  if(sucketPtr.isPendingCloseWait) {
+    sucketPtr.isPendingCloseWait = false;
+    _syscall_close(sucketPtr.pairKey);
+  }
+
   return;
 }
 
@@ -446,8 +465,8 @@ void TCPAssignment::process_send_buffer(int sockfd, int pid) {
     // DEBUG
       std::cout << "handle_ACK: continue close wait process... sending FIN_ACK packet\n";
     // end DEBUG
-
-    _syscall_close(sucket.pairKey);
+    if(pairKeyToSucket.find(sucket.parentPairKey) == pairKeyToSucket.end())
+      _syscall_close(sucket.pairKey);
   }
 
   if(sucket.state != TCP_FIN_WAIT_1 && sucket.sendBuffer.data.size() == sucket.sendBuffer.nextSeqNum && sucket.isPendingClose) {
@@ -792,6 +811,7 @@ void TCPAssignment::_handle_SYN_ACK(Address sourceAddr, Address destAddr, uint32
     sucket.sendBuffer.windowSize = windowSize;
     pairAddressToPairKey[pairAddress] = handshaking[pairAddress];
     handshaking.erase(pairAddress);
+    this->returnSystemCall(sucket.connect_syscallUUID, 0);
     // DEBUG  
       std::cout << "connected\n" << std::flush;
     // end DEBUG
@@ -1098,6 +1118,9 @@ void TCPAssignment::_handle_FIN_ACK(Address sourceAddr, Address destAddr, uint32
     std::cout << "finack handle done: closed connection on socket moved -> TCP_CLOSE_WAIT, fd=" << sucket.pairKey.first << ",pid=" << sucket.pairKey.second << "\n" << std::flush;
   // end DEBUG
 
+  if(pairKeyToSucket.find(sucket.parentPairKey) != pairKeyToSucket.end())
+    return;
+  
   if(sucket.sendBuffer.data.size() == sucket.sendBuffer.nextSeqNum) {
     // DEBUG
       std::cout << "handle_ACK: continue close wait process... sending FIN_ACK packet\n";
@@ -1261,9 +1284,16 @@ void TCPAssignment::timerCallback(std::any payload) {
 
     // DEBUG
       std::cout << "timer: re-send #packets=" << sucket.sendBuffer.pending_packets.size() << '\n';
+      std::cout << "flag =" << sucket.state << '\n';
       if(sucket.state == TCP_FIN_WAIT_2) {
         sucket.finWait2 += 1;
         if(sucket.finWait2 >= 200) {
+          _delete_sucket(sucket);
+        }
+      }
+      if(sucket.state == TCP_CLOSE_WAIT) {
+        sucket.closeWait += 1;
+        if(sucket.closeWait >= 200) {
           _delete_sucket(sucket);
         }
       }
