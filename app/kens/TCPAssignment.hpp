@@ -73,7 +73,8 @@ protected:
   #define ACK_FLAG	0x10
   #define URG_FLAG	0x20
   #define MSS 1460 // max segment size
-  #define MBS 2000000// max buffer size
+  #define MBS 51200// max buffer size
+  #define TIME_OUT 100000000
 
   // constants
 
@@ -145,10 +146,10 @@ protected:
     ReceiveBuffer(): isPending(false), data(std::deque<uint8_t>()) {}
   };
 
-  struct CloseController {
-    bool isPendingClose;
-    UUID syscallUUID;
-  };
+  // struct ConnectionController {
+  //   bool isConnecting;
+  //   UUID syscallUUID;
+  // };
 
   struct Sucket {
     Address localAddr;
@@ -162,15 +163,26 @@ protected:
     SendBuffer sendBuffer;
     ReceiveBuffer receiveBuffer;
     bool isPendingClose;
+    bool isPendingSimulClose;
+    bool isLastTimer;
+    UUID connect_syscallUUID;
+    UUID timerKey;
+    uint8_t lastActionFlag;
     Sucket() : state(TCP_CLOSED), isPendingClose(false) {
       seqNum = uint32_t(rand()) + uint32_t(rand()) * uint32_t(rand());
+      isPendingSimulClose = false;
+      isLastTimer = false;
     }
     Sucket(PairKey pairKey, TCP_STATE state) : pairKey(pairKey), state(state), isPendingClose(false) {
       // Initialize random seq_num here
       seqNum = uint32_t(rand()) + uint32_t(rand()) * uint32_t(rand());
+      isPendingSimulClose = false;
+      isLastTimer = false;
     }
     Sucket(PairKey pairKey, Address localAddr, Address remoteAddr, TCP_STATE state): pairKey(pairKey), localAddr(localAddr), remoteAddr(localAddr), state(state), isPendingClose(false) {
       seqNum = uint32_t(rand()) + uint32_t(rand()) * uint32_t(rand());
+      isPendingSimulClose = false;
+      isLastTimer = false;
     }
   };
 
@@ -209,12 +221,14 @@ protected:
   virtual void _handle_SYN(Address sourceAddr, Address destAddr, uint32_t ackNum, uint16_t windowSize) final;
   virtual void _handle_SYN_ACK(Address sourceAddr, Address destAddr, uint32_t ackNum, uint32_t seqNum, uint16_t windowSize) final;
   virtual void _handle_ACK(Address sourceAddr, Address destAddr, uint32_t ackNum, uint32_t seqNum, uint16_t windowSize) final;
-  virtual void _handle_FIN_ACK(Address sourceAddr, Address destAddr, uint32_t seqNum, uint16_t windowSize) final;
+  virtual void _handle_FIN_ACK(Address sourceAddr, Address destAddr, uint32_t ackNum, uint32_t seqNum, uint16_t windowSize) final;
   virtual void _syscall_close(PairKey pairKey) final;
   virtual void syscall_write(UUID syscallUUID, int pid, int sockfd, const void* buf, int count) final;
   virtual void process_send_buffer(int sockfd, int pid) final;
   virtual void syscall_read(UUID syscallUUID, int pid, int sockfd, void* buf, int count) final;
   virtual void _syscall_read(UUID syscallUUID, struct ReceiveBuffer& receiveBuffer, void* buf, int count) final;
+  virtual void _update_pending_packets(Sucket& sucket) final;
+  virtual void _delete_sucket(Sucket& sucket) final;
 }; 
 
 class TCPAssignmentProvider {
