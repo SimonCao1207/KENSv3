@@ -617,10 +617,12 @@ void TCPAssignment::_handle_SYN(Address sourceAddr, Address destAddr, uint32_t s
   PairAddress pairAddress = PairAddress{destAddr,sourceAddr};
   if(handshaking.find(pairAddress) != handshaking.end()) {
     // DEBUG
-      // std::cout << "Simultaneous connection...";
+      std::cout << "Simultaneous connection...";
     // end DEBUG
     PairKey pairKey = handshaking[pairAddress];
     Sucket& sucket = pairKeyToSucket[pairKey];
+
+    std::cout << "Sucket state = " << sucket.state << "\n";
     if(sucket.state == TCP_SYN_SENT) {
       sucket.state = TCP_SYN_RCVD;
       sucket.localAddr = destAddr;
@@ -630,9 +632,16 @@ void TCPAssignment::_handle_SYN(Address sourceAddr, Address destAddr, uint32_t s
       subBindedAddress[sucket.localAddr] = pairKey;
 
       // DEBUG
-        // std::cout << "Sent SYN_ACK packet for simultaneous connection\n";
+        std::cout << "Sent SYN_ACK packet for simultaneous connection\n";
       // end DEBUG
+    } 
+    else if (sucket.state == TCP_SYN_RCVD){
+      sucket.localAddr = destAddr;
+      sucket.remoteAddr = sourceAddr;
+      _send_packet(sucket, SYN_FLAG | ACK_FLAG);
+      return;
     }
+    
     sucket.sendBuffer.pending_packets.pop_front(); // CHECK HERE
     sucket.ackNum = seqNum + 1;
     sucket.sendBuffer.windowSize = windowSize;
@@ -651,7 +660,7 @@ void TCPAssignment::_handle_SYN(Address sourceAddr, Address destAddr, uint32_t s
   Sucket& listener_sucket = (bindedAddress.find(destAddr) == bindedAddress.end()) ? pairKeyToSucket[bindedAddress[listening_zero_addr]] : pairKeyToSucket[bindedAddress[destAddr]];
 
   // DEBUG
-    // std::cout << "state:" << (handshaking.find(pairAddress) != handshaking.end()) << '\n';
+    std::cout << "state:" << (handshaking.find(pairAddress) != handshaking.end()) << '\n';
   // end DEBUG
 
   if (listener_sucket.state == TCP_LISTEN) {
@@ -659,7 +668,7 @@ void TCPAssignment::_handle_SYN(Address sourceAddr, Address destAddr, uint32_t s
 
     if(connection_queue.capacity == 0) {
       // DEBUG
-      // std::cout << "handlesyn...listening queue overloaded\n" << std::flush;
+      std::cout << "handlesyn...listening queue overloaded\n" << std::flush;
       return;
     }
 
