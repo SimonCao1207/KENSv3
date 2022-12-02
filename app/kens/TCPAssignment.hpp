@@ -177,6 +177,7 @@ protected:
     int closeWait;
     int lastAck;
     int failAckCount;
+    int timeoutCount;
     Sucket() : state(TCP_CLOSED), isPendingClose(false) {
       seqNum = uint32_t(rand()) + uint32_t(rand()) * uint32_t(rand());
       isPendingSimulClose = false;
@@ -188,6 +189,7 @@ protected:
       failAckCount = 0;
       isAccepted = false;
       connect_syscallUUID = -1;
+      timeoutCount = 0;
     }
     Sucket(PairKey pairKey, TCP_STATE state) : pairKey(pairKey), state(state), isPendingClose(false) {
       // Initialize random seq_num here
@@ -201,6 +203,7 @@ protected:
       failAckCount = 0;
       isAccepted = false;
       connect_syscallUUID = -1;
+      timeoutCount = 0;
     }
     Sucket(PairKey pairKey, Address localAddr, Address remoteAddr, TCP_STATE state): pairKey(pairKey), localAddr(localAddr), remoteAddr(localAddr), state(state), isPendingClose(false) {
       seqNum = uint32_t(rand()) + uint32_t(rand()) * uint32_t(rand());
@@ -213,6 +216,7 @@ protected:
       failAckCount = 0;
       isAccepted = false;
       connect_syscallUUID = -1;
+      timeoutCount = 0;
     }
   };
 

@@ -1443,15 +1443,19 @@ void TCPAssignment::timerCallback(std::any payload) {
       std::cout << "flag =" << sucket.state << ",start: ackNum=" << ackNum << "-seqNum=" << seqNum << '\n';
       if(sucket.state == TCP_CLOSE_WAIT) {
         sucket.closeWait += 1;
-        if(sucket.closeWait >= 200) {
+        if(sucket.closeWait >= 400) {
           _delete_sucket(sucket);
         }
       }
       if(sucket.state == TCP_LAST_ACK) {
         sucket.lastAck += 1;
-        if(sucket.lastAck >= 200) {
+        if(sucket.lastAck >= 400) {
           _delete_sucket(sucket);
         }
+      }
+      sucket.timeoutCount += 1;
+      if(sucket.timeoutCount >= 1000) {
+        _delete_sucket(sucket);
       }
     // end DEBUG
     UUID key = this->addTimer(pairKey, TIME_OUT);
