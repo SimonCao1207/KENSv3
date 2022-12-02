@@ -230,7 +230,7 @@ void TCPAssignment::_syscall_close(PairKey pairKey) {
 
 void TCPAssignment:: syscall_close(UUID syscallUUID, int pid, int sockfd){
   // DEBUG
-    std::cout << "SYSCALL_CLOSE: closing sockfd=" << sockfd << ",pid=" << pid<<"\n" << std::flush;
+    // std::cout << "SYSCALL_CLOSE: closing sockfd=" << sockfd << ",pid=" << pid<<"\n" << std::flush;
   // end DEBUG
   PairKey pairKey {sockfd, pid};
   if (pairKeyToSucket.find(pairKey) == pairKeyToSucket.end()){
