@@ -73,7 +73,8 @@ protected:
   #define ACK_FLAG	0x10
   #define URG_FLAG	0x20
   #define MSS 1460 // max segment size
-  #define MBS 51200// max buffer size
+  #define MBS 1000000// max buffer size
+  // #define TIME_OUT 5000000
   #define TIME_OUT 5000000
 
   // constants
@@ -130,6 +131,7 @@ protected:
     int windowSize;
     std::deque<uint8_t> data;
     std::deque<Packet> pending_packets;
+    std::deque<Packet> lastDataPacket;
     SendBuffer(): data(std::deque<uint8_t>()),
                   windowSize(0),
                   nextSeqNum(0),
@@ -173,6 +175,8 @@ protected:
     uint8_t lastActionFlag;
     int finWait2;
     int closeWait;
+    int lastAck;
+    int failAckCount;
     Sucket() : state(TCP_CLOSED), isPendingClose(false) {
       seqNum = uint32_t(rand()) + uint32_t(rand()) * uint32_t(rand());
       isPendingSimulClose = false;
@@ -180,7 +184,10 @@ protected:
       isPendingCloseWait = false;
       finWait2 = 0;
       closeWait = 0;
+      lastAck = 0;
+      failAckCount = 0;
       isAccepted = false;
+      connect_syscallUUID = -1;
     }
     Sucket(PairKey pairKey, TCP_STATE state) : pairKey(pairKey), state(state), isPendingClose(false) {
       // Initialize random seq_num here
@@ -190,7 +197,10 @@ protected:
       isPendingCloseWait = false;
       finWait2 = 0;
       closeWait = 0;
+      lastAck = 0;
+      failAckCount = 0;
       isAccepted = false;
+      connect_syscallUUID = -1;
     }
     Sucket(PairKey pairKey, Address localAddr, Address remoteAddr, TCP_STATE state): pairKey(pairKey), localAddr(localAddr), remoteAddr(localAddr), state(state), isPendingClose(false) {
       seqNum = uint32_t(rand()) + uint32_t(rand()) * uint32_t(rand());
@@ -199,7 +209,10 @@ protected:
       isPendingCloseWait = false;
       finWait2 = 0;
       closeWait = 0;
+      lastAck = 0;
+      failAckCount = 0;
       isAccepted = false;
+      connect_syscallUUID = -1;
     }
   };
 
@@ -246,6 +259,7 @@ protected:
   virtual void _syscall_read(UUID syscallUUID, struct ReceiveBuffer& receiveBuffer, void* buf, int count) final;
   virtual void _update_pending_packets(Sucket& sucket) final;
   virtual void _delete_sucket(Sucket& sucket) final;
+  virtual void _handle_prev_ACK(Sucket& sucket, uint32_t ackNum, uint32_t seqNum, uint16_t windowSize) final;
 }; 
 
 class TCPAssignmentProvider {

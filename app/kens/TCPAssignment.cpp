@@ -161,6 +161,12 @@ void TCPAssignment:: syscall_getsockname( UUID syscallUUID, int pid, int sockfd,
 void TCPAssignment:: _send_packet(Sucket& sucket, uint8_t flag, int dataLength=0){
   Packet packet = create_packet(sucket, flag, dataLength);
   sendPacket(std::string("IPv4"), packet);
+  sendPacket(std::string("IPv4"), packet);
+  sendPacket(std::string("IPv4"), packet);
+  sendPacket(std::string("IPv4"), packet);
+  sendPacket(std::string("IPv4"), packet);
+  sendPacket(std::string("IPv4"), packet);
+  
   sucket.sendBuffer.pending_packets.push_back(packet);
   if(sucket.sendBuffer.pending_packets.size() == 1) {
     // DEBUG
@@ -423,10 +429,6 @@ void TCPAssignment::syscall_accept(UUID syscallUUID, int pid, int sockfd, struct
 }
 
 void TCPAssignment::process_send_buffer(int sockfd, int pid) {
-  // DEBUG
-    std::cout << "process_send_buffer: sockfd=" << sockfd << ",pid=" << pid << '\n';
-  // end DEBUG
-
   PairKey pairKey = {sockfd, pid};
   if(pairKeyToSucket.find(pairKey) == pairKeyToSucket.end()) {
     // DEBUG
@@ -437,6 +439,8 @@ void TCPAssignment::process_send_buffer(int sockfd, int pid) {
 
   Sucket& sucket = pairKeyToSucket[pairKey];
   SendBuffer& sendBuffer = sucket.sendBuffer;
+  if(!sucket.sendBuffer.pending_packets.empty())
+    return;
 
   int send_length = 0;
   do {
@@ -704,6 +708,7 @@ void TCPAssignment::_update_pending_packets(Sucket& sucket) {
     UUID key = this->addTimer(sucket.pairKey, TIME_OUT);
     sucket.timerKey = key;
   }
+  process_send_buffer(sucket.pairKey.first, sucket.pairKey.second);
 }
 
 void TCPAssignment::_handle_SYN(Address sourceAddr, Address destAddr, uint32_t seqNum, uint16_t windowSize) {
@@ -863,6 +868,104 @@ void TCPAssignment::_handle_SYN_ACK(Address sourceAddr, Address destAddr, uint32
   return;
 }
 
+void TCPAssignment::_handle_prev_ACK(Sucket& sucket, uint32_t ackNum, uint32_t seqNum, uint16_t windowSize) {
+  // DEBUG
+    std::cout << "handle_prev_packet: remaining packets to ack =" << sucket.sendBuffer.pending_packets.size() << '\n';
+  // end DEBUG
+  
+  sucket.sendBuffer.windowSize = windowSize;
+
+  bool ackForData = false;
+  if(sucket.state == TCP_ESTABLISHED || (sucket.sendBuffer.pending_packets.front().getSize() - 54) > 0)
+    ackForData = true;
+
+  if(ackForData) {
+    
+
+    uint32_t dataLength = sucket.sendBuffer.pending_packets.front().getSize() - 54;
+
+    // DEBUG
+      std::cout << "handle ACK for data transfer, ackNum=" << ackNum << ", dataLength=" << dataLength << '\n' << std::flush;
+    // end DEBUG
+
+    // DEBUG
+      std::cout << "handle_ACK datalength=" << dataLength << '\n' << std::flush;
+    // end DEBUG
+    
+    if(ackNum != sucket.seqNum + dataLength) {
+      // DEBUG
+        std::cout << "handle ACK for data transfer: wrong ACK number=" << ackNum <<", shouldbe=" << sucket.seqNum + dataLength << "\n" << std::flush;
+      // end DEBUG
+      return;
+    }
+    
+    // ack bytes
+    for(int i = 0; i < dataLength; ++i) {
+      sucket.sendBuffer.data.pop_front();
+    }
+    sucket.sendBuffer.nextSeqNum -= dataLength;
+    while(!sucket.sendBuffer.lastDataPacket.empty()) 
+      sucket.sendBuffer.lastDataPacket.pop_front();
+    sucket.sendBuffer.lastDataPacket.push_front(sucket.sendBuffer.pending_packets.front());
+    sucket.seqNum += dataLength;
+
+    _update_pending_packets(sucket);
+
+    // free(packet);
+    // DEBUG
+      std::cout << "acked #bytes=" << dataLength << ",sucket.seqNum=" << sucket.seqNum << '\n' << std::flush;
+    // end DEBUG
+
+    return;
+  }
+  
+  if(sucket.isPendingSimulClose && sucket.state == TCP_FIN_WAIT_1) {
+    // DEBUG
+      std::cout << "handle_ACK: simultaneous close ending\n";
+    // end DEBUG
+    if(sucket.seqNum != ackNum) {
+      // DEBUG
+        std::cout << "handle_ACK: simultaneous close - wrong ackNum=" << ackNum << ",should seqNum=" << sucket.seqNum << '\n';
+      // end DEBUG
+    }
+
+    // _delete_sucket(sucket);
+    sucket.state = TCP_TIME_WAIT;
+    this->cancelTimer(sucket.timerKey);
+    sucket.isLastTimer = true;
+    UUID key = this->addTimer(sucket.pairKey, 4 * TIME_OUT);
+    sucket.timerKey = key;
+    return;
+  }
+
+  if(sucket.seqNum + 1 != ackNum) {
+    // DEBUG
+      std::cout << "handle_ACK: wrong ackNum=" << ackNum << ",should seqNum + 1=" << sucket.seqNum + 1 << '\n';
+    // end DEBUG
+
+    return;
+  }
+  
+  // sucket.seqNum += bytes; -- no data 
+  // sucket.ackNum = seqNum + 1;
+  // sucket.seqNum += 1;
+  _update_pending_packets(sucket);
+  if(sucket.state == TCP_FIN_WAIT_1) {
+    sucket.state = TCP_FIN_WAIT_2;
+    sucket.seqNum += 1;
+    // DEBUG
+      std::cout << "changed socket state FIN_WAIT_1 -> FIN_WAIT_2\n" << std::flush;
+    // end DEBUG
+    
+  } else if(sucket.state == TCP_LAST_ACK) {
+    _delete_sucket(sucket);
+
+    // DEBUG
+      std::cout << "disconnected server socket: fd=" << sucket.pairKey.first << ",pid=" << sucket.pairKey.second << "\n" << std::flush;
+    // end DEBUG
+  }
+}
+
 void TCPAssignment::_handle_ACK(Address sourceAddr, Address destAddr, uint32_t ackNum, uint32_t seqNum, uint16_t windowSize) {
   // DEBUG
   std::cout << "This is ACK FLAG\n" << std::flush;
@@ -872,6 +975,7 @@ void TCPAssignment::_handle_ACK(Address sourceAddr, Address destAddr, uint32_t a
   if(pairAddressToPairKey.find(pairAddress) != pairAddressToPairKey.end()) {
     Sucket& sucket = pairKeyToSucket[pairAddressToPairKey[pairAddress]];
     PairKey pairKey = sucket.pairKey;
+    sucket.sendBuffer.windowSize = windowSize;
 
     if(sucket.sendBuffer.pending_packets.empty()) {
       // DEBUG
@@ -881,95 +985,122 @@ void TCPAssignment::_handle_ACK(Address sourceAddr, Address destAddr, uint32_t a
       return;
     }
 
-    sucket.sendBuffer.windowSize = windowSize;
+    uint32_t currSeqNum = sucket.seqNum;
+    int validACK = 0;
+    std::vector<Packet> validPackets;
+    for(Packet packet: sucket.sendBuffer.pending_packets) {
+      uint32_t dataLength = packet.getSize() - 54;
 
-    bool ackForData = false;
-    if(sucket.state == TCP_ESTABLISHED || (sucket.sendBuffer.pending_packets.front().getSize() - 54) > 0)
-      ackForData = true;
+      uint8_t flags;
+      packet.readData(FLAGS_OFFSET, &flags, FLAGS_LENGTH);
+      if((flags & SYN_FLAG) > 0 || (flags & FIN_FLAG) > 0)
+        dataLength += 1;
 
-    if(ackForData) {
-      uint32_t dataLength = sucket.sendBuffer.pending_packets.front().getSize() - 54;
-
-      // DEBUG
-        std::cout << "handle ACK for data transfer, ackNum=" << ackNum << ", dataLength=" << dataLength << '\n' << std::flush;
-      // end DEBUG
-
-      // DEBUG
-        std::cout << "handle_ACK datalength=" << dataLength << '\n' << std::flush;
-      // end DEBUG
-      
-      if(ackNum != sucket.seqNum + dataLength) {
-        // DEBUG
-          std::cout << "handle ACK for data transfer: wrong ACK number=" << ackNum <<", shouldbe=" << sucket.seqNum + dataLength << "\n" << std::flush;
-        // end DEBUG
-        return;
+      validPackets.push_back(packet);
+      if(ackNum == currSeqNum + dataLength) {
+        validACK = validPackets.size();
       }
-      
-      // ack bytes
-      for(int i = 0; i < dataLength; ++i) {
-        sucket.sendBuffer.data.pop_front();
-      }
-      sucket.sendBuffer.nextSeqNum -= dataLength;
-      _update_pending_packets(sucket);
-      sucket.seqNum += dataLength;
-
-      // free(packet);
-      // DEBUG
-        std::cout << "acked #bytes=" << dataLength << '\n' << std::flush;
-      // end DEBUG
-
-      process_send_buffer(sucket.pairKey.first, sucket.pairKey.second);
-
-      return;
+      currSeqNum += dataLength;
     }
-    
-    if(sucket.isPendingSimulClose && sucket.state == TCP_FIN_WAIT_1) {
+
+    while(validPackets.size() > validACK)
+      validPackets.pop_back();
+
+    if(validPackets.empty() || validACK == 0) {
       // DEBUG
-        std::cout << "handle_ACK: simultaneous close ending\n";
+        std::cout << "handle_ack: cannot find packet to ACK\n";
       // end DEBUG
-      if(sucket.seqNum != ackNum) {
+
+      // DEBUG
+      if(sucket.sendBuffer.pending_packets.size() > 0) {
+        Packet& packet = sucket.sendBuffer.pending_packets.front();
+        uint32_t seqNum;
+        uint32_t ackNum;
+        packet.readData(SEQ_NUM_OFFSET, &seqNum, SEQ_NUM_LENGTH);
+        packet.readData(ACK_NUM_OFFSET, &ackNum, ACK_NUM_LENGTH);
+        seqNum = ntohl(seqNum);
+        ackNum = ntohl(ackNum);
         // DEBUG
-          std::cout << "handle_ACK: simultaneous close - wrong ackNum=" << ackNum << ",should seqNum=" << sucket.seqNum << '\n';
+          std::cout << "--- handle_ack: cannot find packet to ACK, ack=" << ackNum << ",seqNum=" << seqNum << ",length=" << packet.getSize() - 54 << '\n';
         // end DEBUG
       }
+      // end DEBUG
 
-      // _delete_sucket(sucket);
-      sucket.state = TCP_TIME_WAIT;
-      this->cancelTimer(sucket.timerKey);
-      sucket.isLastTimer = true;
-      UUID key = this->addTimer(sucket.pairKey, 4 * TIME_OUT);
-      sucket.timerKey = key;
+      sucket.failAckCount += 1;
+      if(sucket.failAckCount >= 20) {
+        this->cancelTimer(sucket.timerKey);
+        timerCallback(sucket.pairKey);
+        // _delete_sucket(sucket);
+      }
       return;
     }
 
-    if(sucket.seqNum + 1 != ackNum) {
-      // DEBUG
-        std::cout << "handle_ACK: wrong ackNum=" << ackNum << ",should seqNum + 1=" << sucket.seqNum + 1 << '\n';
-      // end DEBUG
+    // DEBUG
+      std::cout << "handle_ack: #packets to all ack now=" << validPackets.size() << '\n';
+    // end DEBUG
+    
+    sucket.failAckCount = 0;
 
-      return;
+    for(int i = 0; i < validPackets.size(); ++i){
+      Packet& packet = validPackets[i];
+      uint8_t flags;
+      uint32_t seqNum;
+      uint32_t ackNum;
+      packet.readData(FLAGS_OFFSET, &flags, FLAGS_LENGTH);
+      packet.readData(SEQ_NUM_OFFSET, &seqNum, SEQ_NUM_LENGTH);
+      packet.readData(ACK_NUM_OFFSET, &ackNum, ACK_NUM_LENGTH);
+      seqNum = ntohl(seqNum);
+      ackNum = ntohl(ackNum);
+
+      uint32_t trueAckNum = seqNum + packet.getSize() - 54;
+      if((flags & SYN_FLAG) > 0 || (flags & FIN_FLAG) > 0)
+        trueAckNum += 1;
+      uint32_t trueSeqNum = ackNum;
+
+      _handle_prev_ACK(sucket, trueAckNum, trueSeqNum, windowSize);
     }
     
-    // sucket.seqNum += bytes; -- no data 
-    // sucket.ackNum = seqNum + 1;
-    // sucket.seqNum += 1;
-    _update_pending_packets(sucket);
-    if(sucket.state == TCP_FIN_WAIT_1) {
-      sucket.state = TCP_FIN_WAIT_2;
-      sucket.seqNum += 1;
-      // DEBUG
-        std::cout << "changed socket state FIN_WAIT_1 -> FIN_WAIT_2\n" << std::flush;
-      // end DEBUG
-      
-    } else if(sucket.state == TCP_LAST_ACK) {
-      _delete_sucket(sucket);
-
-      // DEBUG
-        std::cout << "disconnected server socket: fd=" << pairKey.first << ",pid=" << pairKey.second << "\n" << std::flush;
-      // end DEBUG
-    }
   } else if(handshaking.find(pairAddress) != handshaking.end()) {
     Sucket& currSucket = pairKeyToSucket[handshaking[pairAddress]];
+    currSucket.sendBuffer.windowSize = windowSize;
+
+    if(currSucket.state == TCP_SYN_SENT) {
+      if(ackNum == 0) {
+        // DEBUG
+          std::cout << "handle_ack: simultaneous dropped packet\n";
+        // end DEBUG
+        currSucket.state = TCP_SYN_RCVD;
+        currSucket.ackNum = seqNum;
+        while(!currSucket.sendBuffer.pending_packets.empty())
+          currSucket.sendBuffer.pending_packets.pop_front();
+        _send_packet(currSucket, SYN_FLAG | ACK_FLAG);
+        return;
+      }
+
+      if(ackNum != currSucket.seqNum + 1) {
+        // DEBUG
+          std::cout << "handle_ack: wrong alternative\n";
+        // end DEBUG
+
+        return;
+      }
+
+
+      // DEBUG
+        std::cout << "handle_ack: SYN-ACK packet dropped - here = alternative ACK\n";
+      // end DEBUG
+      currSucket.state = TCP_ESTABLISHED;
+      currSucket.ackNum = seqNum;
+      currSucket.seqNum += 1;
+      currSucket.sendBuffer.windowSize = windowSize;
+      _update_pending_packets(currSucket);
+      this->returnSystemCall(currSucket.connect_syscallUUID, 0);
+
+      _send_packet(currSucket, ACK_FLAG);
+      pairAddressToPairKey[pairAddress] = handshaking[pairAddress];
+      handshaking.erase(pairAddress);
+      return;
+    }
 
     if(currSucket.sendBuffer.pending_packets.empty()) {
       // DEBUG
@@ -988,6 +1119,10 @@ void TCPAssignment::_handle_ACK(Address sourceAddr, Address destAddr, uint32_t a
     currSucket.sendBuffer.windowSize = windowSize;
     // currSucket.sendBuffer.pending_packets.pop_front();
     _update_pending_packets(currSucket);
+    if(currSucket.connect_syscallUUID != -1) {
+      this->returnSystemCall(currSucket.connect_syscallUUID, 0);
+    }
+    
 
     // DEBUG
       std::cout << "handle_ack: done connection ready to accept from (ip=" << sourceAddr.first << ",port=" << sourceAddr.second << ") to (ip=" << destAddr.first << ",port=" << destAddr.second << '\n';
@@ -1184,7 +1319,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet &&packet) {
   
   // DEBUG
     std::cout << "packetArrived: packet arrived from (ip=" << sourceAddr.first << ",port=" << sourceAddr.second << ") to (ip=" << dest_ip << ",port=" << dest_port << ") flags=" << unsigned(flags) << std::flush;
-    std::cout << " ackNum=" << ackNum << ",seqNum=" << seqNum << ",dataLength=" << packet.getSize() - 54 << '\n';
+    std::cout << " ackNum=" << ackNum << ",seqNum=" << seqNum << ",dataLength=" << packet.getSize() - 54 << ",windowSize=" << windowSize << '\n';
   // end DEBUG
 
   // START - Handle incoming data
@@ -1278,22 +1413,43 @@ void TCPAssignment::timerCallback(std::any payload) {
       // end DEBUG
       return;
     }
-    for(Packet packet: sucket.sendBuffer.pending_packets) {
-      sendPacket(std::string("IPv4"), packet);
+
+    if(sucket.sendBuffer.lastDataPacket.size() > 0)
+      sendPacket(std::string("IPv4"), sucket.sendBuffer.lastDataPacket.front());
+    uint16_t total_sent = 0;
+     
+    for(int i = 0; i < sucket.sendBuffer.pending_packets.size(); ++i) {
+      // if(total_sent + sucket.sendBuffer.pending_packets[i].getSize() - 54 >= sucket.sendBuffer.windowSize)
+      //   break;
+      // total_sent += sucket.sendBuffer.pending_packets[i].getSize() - 54;
+      sendPacket(std::string("IPv4"), sucket.sendBuffer.pending_packets[i]);
+      break;
     }
 
     // DEBUG
       std::cout << "timer: re-send #packets=" << sucket.sendBuffer.pending_packets.size() << '\n';
-      std::cout << "flag =" << sucket.state << '\n';
-      if(sucket.state == TCP_FIN_WAIT_2) {
+      uint32_t seqNum;
+      uint32_t ackNum;
+      sucket.sendBuffer.pending_packets[0].readData(SEQ_NUM_OFFSET, &seqNum, SEQ_NUM_LENGTH);
+      sucket.sendBuffer.pending_packets[0].readData(ACK_NUM_OFFSET, &ackNum, ACK_NUM_LENGTH);
+      seqNum = ntohl(seqNum);
+      ackNum = ntohl(ackNum);
+      if(sucket.state == TCP_FIN_WAIT_2 || sucket.state == TCP_FIN_WAIT_1) {
         sucket.finWait2 += 1;
-        if(sucket.finWait2 >= 200) {
+        if(sucket.finWait2 >= 400) {
           _delete_sucket(sucket);
         }
       }
+      std::cout << "flag =" << sucket.state << ",start: ackNum=" << ackNum << "-seqNum=" << seqNum << '\n';
       if(sucket.state == TCP_CLOSE_WAIT) {
         sucket.closeWait += 1;
         if(sucket.closeWait >= 200) {
+          _delete_sucket(sucket);
+        }
+      }
+      if(sucket.state == TCP_LAST_ACK) {
+        sucket.lastAck += 1;
+        if(sucket.lastAck >= 200) {
           _delete_sucket(sucket);
         }
       }
